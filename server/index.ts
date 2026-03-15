@@ -82,13 +82,15 @@ app.use((req, res, next) => {
     const staticPath = join(process.cwd(), "dist/public");
     app.use(express.static(staticPath));
 
-    // SPA fallback
-    app.get("*", (req, res) => {
-      if (!req.path.startsWith("/api")) {
+    // SPA fallback - must be last
+    app.use((req, res, next) => {
+      if (!req.path.startsWith("/api") && !res.headersSent) {
         const indexPath = join(staticPath, "index.html");
-        res.sendFile(indexPath);
+        res.sendFile(indexPath, (err) => {
+          if (err) next(err);
+        });
       } else {
-        res.status(404).json({ error: "Not Found" });
+        next();
       }
     });
   }
