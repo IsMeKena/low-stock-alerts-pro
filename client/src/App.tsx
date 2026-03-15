@@ -42,7 +42,10 @@ export default function App() {
   const handleInstall = () => {
     const shopInput = (document.getElementById("shopInput") as HTMLInputElement)?.value;
     if (shopInput) {
-      window.location.href = `/api/auth?shop=${shopInput}`;
+      const params = new URLSearchParams(window.location.search);
+      const host = params.get("host");
+      const hostParam = host ? `&host=${host}` : "";
+      window.location.href = `/api/auth?shop=${shopInput}${hostParam}`;
     }
   };
 
@@ -92,6 +95,10 @@ export default function App() {
   }
 
   if (!authenticated) {
+    const params = new URLSearchParams(window.location.search);
+    const host = params.get("host");
+    const hostParam = host ? `&host=${host}` : "";
+
     return (
       <div className="container">
         <div className="card">
@@ -100,7 +107,7 @@ export default function App() {
           <p className="small">You will be redirected to Shopify to authorize the app.</p>
           <button
             onClick={() => {
-              window.location.href = `/api/auth?shop=${shop}`;
+              window.location.href = `/api/auth?shop=${shop}${hostParam}`;
             }}
             className="button"
           >
