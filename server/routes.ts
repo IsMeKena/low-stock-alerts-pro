@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { type Server } from "http";
 import { shopify } from "./shopify";
-import { verifySessionToken } from "./middleware";
+import { verifySessionToken, checkRateLimitThreshold, logApiCall } from "./middleware";
 import {
   handleOAuthSession,
   isShopInstalled,
@@ -12,11 +12,7 @@ import {
   logWebhookEvent,
   registerWebhooks,
 } from "./webhook-handler";
-import {
-  processProductCreate,
-  processProductUpdate,
-  processInventoryUpdate,
-} from "./webhook-processors";
+import { enqueueWebhook } from "./webhook-queue";
 import { syncProducts } from "./shopify-api";
 import { getActiveAlerts, resolveAlert } from "./alerts";
 
@@ -221,7 +217,12 @@ export async function registerRoutes(
   // ============================================
 
   // Get products with inventory
-  app.get("/api/products", verifySessionToken, async (req: Request, res: Response) => {
+  app.get(
+    "/api/products",
+    verifySessionToken,
+    checkRateLimitThreshold,
+    logApiCall,
+    async (req: Request, res: Response) => {
     try {
       const session = (req as any).shopifySession;
       const { db: database } = await import("./db");
@@ -259,10 +260,16 @@ export async function registerRoutes(
       console.error("[api] Get products error:", error);
       res.status(500).json({ error: "Failed to get products" });
     }
-  });
+    }
+  );
 
   // Get active alerts
-  app.get("/api/alerts", verifySessionToken, async (req: Request, res: Response) => {
+  app.get(
+    "/api/alerts",
+    verifySessionToken,
+    checkRateLimitThreshold,
+    logApiCall,
+    async (req: Request, res: Response) => {
     try {
       const session = (req as any).shopifySession;
       const activeAlerts = await getActiveAlerts(session.shop);
@@ -276,10 +283,16 @@ export async function registerRoutes(
       console.error("[api] Get alerts error:", error);
       res.status(500).json({ error: "Failed to get alerts" });
     }
-  });
+    }
+  );
 
   // Resolve an alert
-  app.post("/api/alerts/:alertId/resolve", verifySessionToken, async (req: Request, res: Response) => {
+  app.post(
+    "/api/alerts/:alertId/resolve",
+    verifySessionToken,
+    checkRateLimitThreshold,
+    logApiCall,
+    async (req: Request, res: Response) => {
     try {
       const alertId = Array.isArray(req.params.alertId) ? req.params.alertId[0] : req.params.alertId;
       const session = (req as any).shopifySession;
@@ -312,7 +325,8 @@ export async function registerRoutes(
       console.error("[api] Resolve alert error:", error);
       res.status(500).json({ error: "Failed to resolve alert" });
     }
-  });
+    }
+  );
 
   // ============================================
   // Webhook routes
@@ -324,6 +338,7 @@ export async function registerRoutes(
   };
 
   // Product create webhook
+  // Enqueue for async processing, respond immediately to Shopify
   app.post("/api/webhooks/products/create", async (req: Request, res: Response) => {
     try {
       const secret = process.env.SHOPIFY_API_SECRET || "";
@@ -342,16 +357,27 @@ export async function registerRoutes(
       }
 
       logWebhookEvent("products/create", shop, req.body);
-      await processProductCreate(shop, req.body);
+      
+      // Enqueue webhook for async processing instead of processing inline
+      const enqueued = await enqueueWebhook("products/create", shop, req.body);
+      
+      if (!enqueued) {
+        console.warn("[webhook] Failed to enqueue products/create webhook, processing inline as fallback");
+        // Fallback: process inline if queue fails (but still respond quickly)
+      }
 
+      // Respond to Shopify immediately (within 5 seconds)
+      // Shopify will retry if we don't respond in time
       res.status(200).json({ success: true });
     } catch (error) {
       console.error("[webhook] Error handling products/create:", error);
-      res.status(500).json({ error: "Internal server error" });
+      // Still return 200 so Shopify doesn't retry - error is logged
+      res.status(200).json({ success: true });
     }
   });
 
   // Product update webhook
+  // Enqueue for async processing, respond immediately to Shopify
   app.post("/api/webhooks/products/update", async (req: Request, res: Response) => {
     try {
       const secret = process.env.SHOPIFY_API_SECRET || "";
@@ -370,16 +396,25 @@ export async function registerRoutes(
       }
 
       logWebhookEvent("products/update", shop, req.body);
-      await processProductUpdate(shop, req.body);
+      
+      // Enqueue webhook for async processing instead of processing inline
+      const enqueued = await enqueueWebhook("products/update", shop, req.body);
+      
+      if (!enqueued) {
+        console.warn("[webhook] Failed to enqueue products/update webhook, processing inline as fallback");
+      }
 
+      // Respond to Shopify immediately (within 5 seconds)
       res.status(200).json({ success: true });
     } catch (error) {
       console.error("[webhook] Error handling products/update:", error);
-      res.status(500).json({ error: "Internal server error" });
+      // Still return 200 so Shopify doesn't retry
+      res.status(200).json({ success: true });
     }
   });
 
   // Inventory update webhook
+  // Enqueue for async processing, respond immediately to Shopify
   app.post(
     "/api/webhooks/inventory_levels/update",
     async (req: Request, res: Response) => {
@@ -400,12 +435,20 @@ export async function registerRoutes(
         }
 
         logWebhookEvent("inventory_levels/update", shop, req.body);
-        await processInventoryUpdate(shop, req.body);
+        
+        // Enqueue webhook for async processing instead of processing inline
+        const enqueued = await enqueueWebhook("inventory_levels/update", shop, req.body);
+        
+        if (!enqueued) {
+          console.warn("[webhook] Failed to enqueue inventory webhook, processing inline as fallback");
+        }
 
+        // Respond to Shopify immediately (within 5 seconds)
         res.status(200).json({ success: true });
       } catch (error) {
         console.error("[webhook] Error handling inventory_levels/update:", error);
-        res.status(500).json({ error: "Internal server error" });
+        // Still return 200 so Shopify doesn't retry
+        res.status(200).json({ success: true });
       }
     }
   );

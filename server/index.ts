@@ -3,6 +3,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { createServer } from "http";
 import { join } from "path";
+import { closeWebhookQueue } from "./webhook-queue";
 
 const app = express();
 const httpServer = createServer(app);
@@ -107,4 +108,23 @@ app.use((req, res, next) => {
       log(`Environment: ${process.env.NODE_ENV || "development"}`);
     }
   );
+
+  // Graceful shutdown
+  process.on("SIGTERM", async () => {
+    log("SIGTERM received, shutting down gracefully...");
+    await closeWebhookQueue();
+    httpServer.close(() => {
+      log("Server closed");
+      process.exit(0);
+    });
+  });
+
+  process.on("SIGINT", async () => {
+    log("SIGINT received, shutting down gracefully...");
+    await closeWebhookQueue();
+    httpServer.close(() => {
+      log("Server closed");
+      process.exit(0);
+    });
+  });
 })();

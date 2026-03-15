@@ -13,14 +13,18 @@ export default function App() {
 
     if (shopParam) {
       setShop(shopParam);
-      // If we have both shop and host, we're in an embedded app context
-      // Trust that Shopify has authenticated us
+      
+      // In embedded app context (has host param), trust Shopify's authentication
+      // authenticatedFetch being available indicates we're in an embedded context
       if (hostParam) {
         console.log(`[app] Embedded app context detected, trusting Shopify session`);
         setAuthenticated(true);
         setLoading(false);
-      } else {
-        // Non-embedded context, check installation
+        return;
+      }
+
+      // Non-embedded context: check if app is installed
+      if (!hostParam) {
         checkInstalled(shopParam);
       }
     } else {
@@ -57,6 +61,14 @@ export default function App() {
       const hostParam = host ? `&host=${host}` : "";
       window.location.href = `/api/auth?shop=${shopInput}${hostParam}`;
     }
+  };
+
+  const handleAuthorize = () => {
+    if (!shop) return;
+    const params = new URLSearchParams(window.location.search);
+    const host = params.get("host");
+    const hostParam = host ? `&host=${host}` : "";
+    window.location.href = `/api/auth?shop=${shop}${hostParam}`;
   };
 
   if (loading) {
@@ -105,10 +117,6 @@ export default function App() {
   }
 
   if (!authenticated) {
-    const params = new URLSearchParams(window.location.search);
-    const host = params.get("host");
-    const hostParam = host ? `&host=${host}` : "";
-
     return (
       <div className="container">
         <div className="card">
@@ -116,9 +124,7 @@ export default function App() {
           <p>Please complete the authentication process.</p>
           <p className="small">You will be redirected to Shopify to authorize the app.</p>
           <button
-            onClick={() => {
-              window.location.href = `/api/auth?shop=${shop}${hostParam}`;
-            }}
+            onClick={handleAuthorize}
             className="button"
           >
             Authorize with Shopify
