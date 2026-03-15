@@ -2,6 +2,8 @@ import "dotenv/config";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { createServer } from "http";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
 const app = express();
 const httpServer = createServer(app);
@@ -78,13 +80,15 @@ app.use((req, res, next) => {
 
   // Serve static assets in production
   if (process.env.NODE_ENV === "production") {
-    const staticPath = new URL("../dist/public", import.meta.url).pathname;
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const staticPath = join(__dirname, "../dist/public");
     app.use(express.static(staticPath));
 
     // SPA fallback
     app.get("*", (req, res) => {
       if (!req.path.startsWith("/api")) {
-        const indexPath = new URL("../dist/public/index.html", import.meta.url).pathname;
+        const indexPath = join(staticPath, "index.html");
         res.sendFile(indexPath);
       } else {
         res.status(404).json({ error: "Not Found" });
