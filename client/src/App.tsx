@@ -9,10 +9,20 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const shopParam = params.get("shop");
+    const hostParam = params.get("host");
 
     if (shopParam) {
       setShop(shopParam);
-      checkInstalled(shopParam);
+      // If we have both shop and host, we're in an embedded app context
+      // Trust that Shopify has authenticated us
+      if (hostParam) {
+        console.log(`[app] Embedded app context detected, trusting Shopify session`);
+        setAuthenticated(true);
+        setLoading(false);
+      } else {
+        // Non-embedded context, check installation
+        checkInstalled(shopParam);
+      }
     } else {
       setLoading(false);
     }
