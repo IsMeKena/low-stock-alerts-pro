@@ -680,24 +680,44 @@ async function processInventoryUpdate(shop, payload) {
 }
 
 // server/webhook-queue.ts
-var webhookQueue = new import_bull.default("webhooks", {
-  // Use default connection (will use REDIS_URL env var if available, else defaults to localhost:6379)
-  redis: process.env.REDIS_URL || { host: "127.0.0.1", port: 6379 },
-  defaultJobOptions: {
-    attempts: 3,
-    // Retry failed jobs up to 3 times
-    backoff: {
-      type: "exponential",
-      delay: 2e3
-      // Start with 2 seconds, exponentially increase
-    },
-    removeOnComplete: true
-    // Clean up completed jobs
+var webhookQueue = null;
+var queueReady = false;
+var fallbackMode = false;
+var initializeQueue = async () => {
+  try {
+    webhookQueue = new import_bull.default("webhooks", {
+      redis: process.env.REDIS_URL || { host: "127.0.0.1", port: 6379 },
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: "exponential",
+          delay: 2e3
+        },
+        removeOnComplete: true
+      }
+    });
+    await webhookQueue.client.ping();
+    queueReady = true;
+    console.log("[webhook-queue] \u2705 Connected to Redis, queue ready");
+    webhookQueue.on("completed", (job) => {
+      console.log(`[webhook-queue] Job ${job.id} completed successfully`);
+    });
+    webhookQueue.on("failed", (job, err) => {
+      console.error(`[webhook-queue] Job ${job.id} failed after ${job.attemptsMade} attempts:`, err.message);
+    });
+    webhookQueue.on("error", (error) => {
+      console.error("[webhook-queue] Queue connection error:", error);
+    });
+    webhookQueue.process(async (job) => {
+      await processWebhook(job.data.topic, job.data.shop, job.data.payload, job.id);
+    });
+  } catch (error) {
+    console.warn(`[webhook-queue] \u26A0\uFE0F  Redis unavailable (${error.code}), using synchronous fallback`);
+    fallbackMode = true;
+    webhookQueue = null;
   }
-});
-webhookQueue.process(async (job) => {
-  const { topic, shop, payload } = job.data;
-  const jobId = job.id;
+};
+async function processWebhook(topic, shop, payload, jobId = "sync") {
   try {
     console.log(`[webhook-queue] Processing ${topic} for ${shop} (job ${jobId})`);
     switch (topic) {
@@ -718,26 +738,25 @@ webhookQueue.process(async (job) => {
     console.error(`[webhook-queue] Error processing ${topic} for ${shop}:`, error);
     throw error;
   }
-});
-webhookQueue.on("completed", (job) => {
-  console.log(`[webhook-queue] Job ${job.id} completed successfully`);
-});
-webhookQueue.on("failed", (job, err) => {
-  console.error(`[webhook-queue] Job ${job.id} failed after ${job.attemptsMade} attempts:`, err.message);
-});
-webhookQueue.on("error", (error) => {
-  console.error("[webhook-queue] Queue error:", error);
-});
+}
 async function enqueueWebhook(topic, shop, payload) {
   try {
-    const job = await webhookQueue.add(
-      { topic, shop, payload },
-      {
-        jobId: `${topic}__${shop}__${Date.now()}`
-        // Unique job ID for idempotency
-      }
-    );
-    console.log(`[webhook-queue] Enqueued ${topic} for ${shop} (job ${job.id})`);
+    if (queueReady && webhookQueue) {
+      const job = await webhookQueue.add(
+        { topic, shop, payload },
+        {
+          jobId: `${topic}__${shop}__${Date.now()}`
+        }
+      );
+      console.log(`[webhook-queue] Enqueued ${topic} for ${shop} (job ${job.id})`);
+      return true;
+    }
+    console.log(`[webhook-queue] (fallback mode) Processing ${topic} for ${shop} synchronously`);
+    setImmediate(() => {
+      processWebhook(topic, shop, payload, "sync").catch((error) => {
+        console.error(`[webhook-queue] Fallback processing failed:`, error);
+      });
+    });
     return true;
   } catch (error) {
     console.error(`[webhook-queue] Failed to enqueue ${topic} for ${shop}:`, error);
@@ -745,6 +764,10 @@ async function enqueueWebhook(topic, shop, payload) {
   }
 }
 async function closeWebhookQueue() {
+  if (!webhookQueue) {
+    console.log("[webhook-queue] No queue to close (fallback mode)");
+    return;
+  }
   try {
     await webhookQueue.close();
     console.log("[webhook-queue] Queue closed successfully");
@@ -752,6 +775,7 @@ async function closeWebhookQueue() {
     console.error("[webhook-queue] Error closing queue:", error);
   }
 }
+initializeQueue();
 
 // server/shopify-api.ts
 init_db();
