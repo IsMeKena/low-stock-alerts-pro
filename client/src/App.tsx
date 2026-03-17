@@ -1,13 +1,21 @@
 import { useEffect, useState } from "react";
+import {
+  Card,
+  Layout,
+  Button,
+  Text,
+  Box,
+  BlockStack,
+  Banner,
+  TextField,
+} from "@shopify/polaris";
 import Onboarding from "./pages/Onboarding";
 import Dashboard from "./pages/Dashboard";
 
 export default function App() {
   const [shop, setShop] = useState<string | null>(null);
-  const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isOnboarded, setIsOnboarded] = useState(false);
   const [page, setPage] = useState<"install" | "authorize" | "onboard" | "dashboard">("install");
 
   useEffect(() => {
@@ -17,12 +25,11 @@ export default function App() {
 
     if (shopParam) {
       setShop(shopParam);
-      
+
       // In embedded app context (has host param), trust Shopify's authentication
       // authenticatedFetch being available indicates we're in an embedded context
       if (hostParam) {
         console.log(`[app] Embedded app context detected, trusting Shopify session`);
-        setAuthenticated(true);
         checkOnboardingStatus(shopParam);
         return;
       }
@@ -43,18 +50,15 @@ export default function App() {
 
       if (data.installed) {
         console.log(`[app] App is installed for ${shopDomain}`);
-        setAuthenticated(true);
         checkOnboardingStatus(shopDomain);
       } else {
         console.log(`[app] App not installed for ${shopDomain}, needs OAuth`);
-        setAuthenticated(false);
         setPage("authorize");
         setLoading(false);
       }
     } catch (error) {
       console.error("[app] Installation check failed:", error);
       setError("Failed to check installation status");
-      setAuthenticated(false);
       setPage("authorize");
       setLoading(false);
     }
@@ -67,11 +71,9 @@ export default function App() {
 
       if (data.isOnboarded) {
         console.log(`[app] Onboarding complete for ${shopDomain}`);
-        setIsOnboarded(true);
         setPage("dashboard");
       } else {
         console.log(`[app] Onboarding required for ${shopDomain}`);
-        setIsOnboarded(false);
         setPage("onboard");
       }
     } catch (error) {
@@ -103,64 +105,113 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="container">
-        <div className="card">
-          <h2>Loading...</h2>
-          <p>Checking app installation status...</p>
-        </div>
-      </div>
+      <Box paddingBlockStart="400" paddingBlockEnd="400">
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingLg">
+                  Loading...
+                </Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Checking app installation status...
+                </Text>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <div className="container">
-        <div className="card error">
-          <h2>Error</h2>
-          <p>{error}</p>
-          <button onClick={() => window.location.reload()} className="button">
-            Retry
-          </button>
-        </div>
-      </div>
+      <Box paddingBlockStart="400" paddingBlockEnd="400">
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Banner tone="critical">
+                  <Text as="p">{error}</Text>
+                </Banner>
+                <Button onClick={() => window.location.reload()}>
+                  Retry
+                </Button>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Box>
     );
   }
 
   if (page === "install") {
     return (
-      <div className="container">
-        <div className="card">
-          <h1>Low Stock Alerts</h1>
-          <p>Enter your Shopify store domain to install the app</p>
-          <input
-            id="shopInput"
-            type="text"
-            placeholder="your-store.myshopify.com"
-            className="input"
-          />
-          <button onClick={handleInstall} className="button">
-            Install App
-          </button>
-        </div>
-      </div>
+      <Box paddingBlockStart="400" paddingBlockEnd="400">
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <BlockStack gap="200">
+                  <Text as="h1" variant="headingLg">
+                    Low Stock Alerts
+                  </Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    Enter your Shopify store domain to install the app
+                  </Text>
+                </BlockStack>
+
+                <TextField
+                  id="shopInput"
+                  label="Store Domain"
+                  placeholder="your-store.myshopify.com"
+                  type="text"
+                  autoComplete="off"
+                />
+
+                <Button
+                  onClick={handleInstall}
+                  variant="primary"
+                  fullWidth
+                >
+                  Install App
+                </Button>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Box>
     );
   }
 
   if (page === "authorize") {
     return (
-      <div className="container">
-        <div className="card">
-          <h2>Installing Low Stock Alerts...</h2>
-          <p>Please complete the authentication process.</p>
-          <p className="small">You will be redirected to Shopify to authorize the app.</p>
-          <button
-            onClick={handleAuthorize}
-            className="button"
-          >
-            Authorize with Shopify
-          </button>
-        </div>
-      </div>
+      <Box paddingBlockStart="400" paddingBlockEnd="400">
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <BlockStack gap="200">
+                  <Text as="h2" variant="headingLg">
+                    Installing Low Stock Alerts...
+                  </Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    Please complete the authentication process. You will be redirected to Shopify to authorize the app.
+                  </Text>
+                </BlockStack>
+
+                <Button
+                  onClick={handleAuthorize}
+                  variant="primary"
+                  fullWidth
+                >
+                  Authorize with Shopify
+                </Button>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Box>
     );
   }
 

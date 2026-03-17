@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
-import "./Dashboard.css";
+import {
+  Card,
+  Layout,
+  Button,
+  Text,
+  Box,
+  BlockStack,
+  InlineStack,
+  Badge,
+  ProgressBar,
+  Divider,
+} from "@shopify/polaris";
 
 interface DashboardProps {
   shop: string | null;
@@ -42,98 +53,169 @@ export default function Dashboard({ shop }: DashboardProps) {
 
   if (loading) {
     return (
-      <div className="dashboard-container">
-        <div className="dashboard-card">
-          <h2>Loading...</h2>
-        </div>
-      </div>
+      <Box paddingBlockStart="400" paddingBlockEnd="400">
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <Text as="h2" variant="headingLg">
+                Loading...
+              </Text>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <div className="dashboard-container">
-        <div className="dashboard-card error">
-          <h2>Error</h2>
-          <p>{error}</p>
-          <button onClick={() => window.location.reload()} className="button">
-            Retry
-          </button>
-        </div>
-      </div>
+      <Box paddingBlockStart="400" paddingBlockEnd="400">
+        <Layout>
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingLg" tone="critical">
+                  Error
+                </Text>
+                <Text as="p" variant="bodyMd">
+                  {error}
+                </Text>
+                <Button onClick={() => window.location.reload()}>
+                  Retry
+                </Button>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        </Layout>
+      </Box>
     );
   }
 
+  const getPlanColor = (plan: string): "success" | "warning" | "attention" | "info" => {
+    const planLower = plan.toLowerCase();
+    if (planLower === "free") return "info";
+    if (planLower === "pro") return "warning";
+    if (planLower === "premium") return "success";
+    return "info";
+  };
+
+  const getEmailProgress = (): number => {
+    if (typeof billing?.emailLimit === "string" || !billing?.emailLimit) return 0;
+    return Math.min((billing.emailUsed / (billing.emailLimit as number)) * 100, 100);
+  };
+
+  const getWhatsappProgress = (): number => {
+    if (typeof billing?.whatsappLimit === "string" || billing?.whatsappLimit === 0 || !billing?.whatsappLimit) return 0;
+    return Math.min((billing.whatsappUsed / (billing.whatsappLimit as number)) * 100, 100);
+  };
+
   return (
-    <div className="dashboard-container">
-      <div className="dashboard-header">
-        <h1>📊 Low Stock Alerts Dashboard</h1>
-        <p className="store-name">{shop}</p>
-      </div>
+    <Box paddingBlockStart="400" paddingBlockEnd="400">
+      <Layout>
+        {/* Header Section */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="200">
+              <InlineStack align="space-between" blockAlign="center">
+                <BlockStack gap="100">
+                  <Text as="h1" variant="headingLg">
+                    📊 Low Stock Alerts Dashboard
+                  </Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    {shop}
+                  </Text>
+                </BlockStack>
+                <Badge tone={getPlanColor(billing?.plan || "free")}>
+                  {billing?.plan?.toUpperCase()}
+                </Badge>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
 
-      {/* Billing & Usage Section */}
-      <div className="dashboard-grid">
-        <div className="dashboard-card">
-          <h3>📋 Current Plan</h3>
-          <div className="plan-badge">{billing?.plan?.toUpperCase()}</div>
-        </div>
+        {/* Billing & Usage Section - Grid layout */}
+        <Layout.Section>
+          <BlockStack gap="300">
+            {/* Email and WhatsApp Usage in a row */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    📧 Email Usage
+                  </Text>
+                  <BlockStack gap="200">
+                    <ProgressBar
+                      progress={getEmailProgress()}
+                    />
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodySm">
+                        {billing?.emailUsed} / {billing?.emailLimit}
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {Math.round(getEmailProgress())}%
+                      </Text>
+                    </InlineStack>
+                  </BlockStack>
+                </BlockStack>
+              </Card>
 
-        <div className="dashboard-card">
-          <h3>📧 Email Usage</h3>
-          <div className="usage-bar">
-            <div
-              className="usage-fill"
-              style={{
-                width:
-                  typeof billing?.emailLimit === "string"
-                    ? "100%"
-                    : `${(billing!.emailUsed / (billing!.emailLimit as number)) * 100}%`,
-              }}
-            />
-          </div>
-          <p className="usage-text">
-            {billing?.emailUsed} / {billing?.emailLimit}
-          </p>
-        </div>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h3" variant="headingMd">
+                    💬 WhatsApp Usage
+                  </Text>
+                  <BlockStack gap="200">
+                    <ProgressBar
+                      progress={getWhatsappProgress()}
+                    />
+                    <InlineStack align="space-between">
+                      <Text as="p" variant="bodySm">
+                        {billing?.whatsappUsed} / {billing?.whatsappLimit}
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {Math.round(getWhatsappProgress())}%
+                      </Text>
+                    </InlineStack>
+                  </BlockStack>
+                </BlockStack>
+              </Card>
+            </div>
+          </BlockStack>
+        </Layout.Section>
 
-        <div className="dashboard-card">
-          <h3>💬 WhatsApp Usage</h3>
-          <div className="usage-bar">
-            <div
-              className="usage-fill"
-              style={{
-                width:
-                  typeof billing?.whatsappLimit === "string" ||
-                  billing?.whatsappLimit === 0
-                    ? "0%"
-                    : `${(billing!.whatsappUsed / (billing!.whatsappLimit as number)) * 100}%`,
-              }}
-            />
-          </div>
-          <p className="usage-text">
-            {billing?.whatsappUsed} / {billing?.whatsappLimit}
-          </p>
-        </div>
-      </div>
+        {/* Quick Actions */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h3" variant="headingMd">
+                ⚙️ Quick Actions
+              </Text>
+              <Divider />
+              <InlineStack gap="200" wrap>
+                <Button>Edit Thresholds</Button>
+                <Button>Manage Notifications</Button>
+                <Button>View Products</Button>
+                <Button variant="primary">Upgrade Plan</Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
 
-      {/* Quick Actions */}
-      <div className="dashboard-section">
-        <h3>⚙️ Quick Actions</h3>
-        <div className="action-buttons">
-          <button className="action-btn">Edit Thresholds</button>
-          <button className="action-btn">Manage Notifications</button>
-          <button className="action-btn">View Products</button>
-          <button className="action-btn">Upgrade Plan</button>
-        </div>
-      </div>
-
-      {/* Status Info */}
-      <div className="dashboard-section">
-        <h3>ℹ️ Information</h3>
-        <p className="info-text">
-          All systems operational. Alerts are being monitored for your products.
-        </p>
-      </div>
-    </div>
+        {/* Status Info */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="200">
+              <Text as="h3" variant="headingMd">
+                ℹ️ Status
+              </Text>
+              <Divider />
+              <Text as="p" variant="bodyMd" tone="success">
+                ✓ All systems operational. Alerts are being monitored for your products.
+              </Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+      </Layout>
+    </Box>
   );
 }

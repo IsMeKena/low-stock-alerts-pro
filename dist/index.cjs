@@ -34,12 +34,16 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var schema_exports = {};
 __export(schema_exports, {
   alerts: () => alerts,
+  batchingQueue: () => batchingQueue,
+  billingPlans: () => billingPlans,
   insertShopifySessionSchema: () => insertShopifySessionSchema,
   inventory: () => inventory,
   products: () => products,
-  shopifySessions: () => shopifySessions
+  shopSettings: () => shopSettings,
+  shopifySessions: () => shopifySessions,
+  usageTracker: () => usageTracker
 });
-var import_drizzle_orm, import_pg_core, import_drizzle_zod, shopifySessions, insertShopifySessionSchema, products, inventory, alerts;
+var import_drizzle_orm, import_pg_core, import_drizzle_zod, shopifySessions, insertShopifySessionSchema, products, inventory, alerts, billingPlans, usageTracker, shopSettings, batchingQueue;
 var init_schema = __esm({
   "shared/schema.ts"() {
     "use strict";
@@ -64,6 +68,15 @@ var init_schema = __esm({
       title: (0, import_pg_core.text)("title").notNull(),
       handle: (0, import_pg_core.text)("handle"),
       imageUrl: (0, import_pg_core.text)("image_url"),
+      // Smart thresholds (Phase 4)
+      thresholdType: (0, import_pg_core.varchar)("threshold_type", { length: 20 }).default("quantity"),
+      // quantity or percentage
+      thresholdValue: (0, import_pg_core.integer)("threshold_value").default(5),
+      // units or %
+      safetyStock: (0, import_pg_core.integer)("safety_stock").default(10),
+      // for percentage mode
+      locationId: (0, import_pg_core.varchar)("location_id", { length: 255 }),
+      // for location-aware alerts
       createdAt: (0, import_pg_core.timestamp)("created_at").notNull().defaultNow(),
       updatedAt: (0, import_pg_core.timestamp)("updated_at").notNull().defaultNow()
     });
@@ -90,6 +103,55 @@ var init_schema = __esm({
       createdAt: (0, import_pg_core.timestamp)("created_at").notNull().defaultNow(),
       resolvedAt: (0, import_pg_core.timestamp)("resolved_at")
     });
+    billingPlans = (0, import_pg_core.pgTable)("billing_plan", {
+      id: (0, import_pg_core.varchar)("id", { length: 255 }).primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+      shopDomain: (0, import_pg_core.varchar)("shop_domain", { length: 255 }).notNull().unique(),
+      plan: (0, import_pg_core.varchar)("plan", { length: 20 }).notNull().default("free"),
+      // free, pro, premium
+      createdAt: (0, import_pg_core.timestamp)("created_at").notNull().defaultNow(),
+      updatedAt: (0, import_pg_core.timestamp)("updated_at").notNull().defaultNow()
+    });
+    usageTracker = (0, import_pg_core.pgTable)("usage_tracker", {
+      id: (0, import_pg_core.varchar)("id", { length: 255 }).primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+      shopDomain: (0, import_pg_core.varchar)("shop_domain", { length: 255 }).notNull(),
+      plan: (0, import_pg_core.varchar)("plan", { length: 20 }).notNull(),
+      emailCount: (0, import_pg_core.integer)("email_count").notNull().default(0),
+      whatsappCount: (0, import_pg_core.integer)("whatsapp_count").notNull().default(0),
+      month: (0, import_pg_core.varchar)("month", { length: 7 }).notNull(),
+      // YYYY-MM
+      usageRemaining: (0, import_pg_core.integer)("usage_remaining").notNull().default(0),
+      createdAt: (0, import_pg_core.timestamp)("created_at").notNull().defaultNow(),
+      updatedAt: (0, import_pg_core.timestamp)("updated_at").notNull().defaultNow()
+    });
+    shopSettings = (0, import_pg_core.pgTable)("shop_settings", {
+      id: (0, import_pg_core.varchar)("id", { length: 255 }).primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+      shopDomain: (0, import_pg_core.varchar)("shop_domain", { length: 255 }).notNull().unique(),
+      whatsappNumber: (0, import_pg_core.varchar)("whatsapp_number", { length: 20 }),
+      // +1234567890 format
+      batchingEnabled: (0, import_pg_core.boolean)("batching_enabled").default(false),
+      batchingInterval: (0, import_pg_core.varchar)("batching_interval", { length: 20 }).default("daily"),
+      // hourly, daily, weekly
+      emailAlertsEnabled: (0, import_pg_core.boolean)("email_alerts_enabled").default(true),
+      isOnboarded: (0, import_pg_core.boolean)("is_onboarded").default(false),
+      createdAt: (0, import_pg_core.timestamp)("created_at").notNull().defaultNow(),
+      updatedAt: (0, import_pg_core.timestamp)("updated_at").notNull().defaultNow()
+    });
+    batchingQueue = (0, import_pg_core.pgTable)("batching_queue", {
+      id: (0, import_pg_core.varchar)("id", { length: 255 }).primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
+      shopDomain: (0, import_pg_core.varchar)("shop_domain", { length: 255 }).notNull(),
+      alertId: (0, import_pg_core.varchar)("alert_id", { length: 255 }).notNull(),
+      productId: (0, import_pg_core.varchar)("product_id", { length: 255 }).notNull(),
+      locationId: (0, import_pg_core.varchar)("location_id", { length: 255 }),
+      quantity: (0, import_pg_core.integer)("quantity").notNull(),
+      threshold: (0, import_pg_core.integer)("threshold").notNull(),
+      alertType: (0, import_pg_core.varchar)("alert_type", { length: 20 }).notNull(),
+      // email, whatsapp
+      status: (0, import_pg_core.varchar)("status", { length: 20 }).default("pending"),
+      // pending, sent, failed
+      scheduledFor: (0, import_pg_core.timestamp)("scheduled_for").notNull(),
+      sentAt: (0, import_pg_core.timestamp)("sent_at"),
+      createdAt: (0, import_pg_core.timestamp)("created_at").notNull().defaultNow()
+    });
   }
 });
 
@@ -113,6 +175,800 @@ var init_db = __esm({
       connectionString: databaseUrl
     });
     db = (0, import_node_postgres.drizzle)(pool, { schema: schema_exports });
+  }
+});
+
+// server/billing-service.ts
+async function getUserPlan(shopDomain) {
+  try {
+    const plan = await db.select().from(billingPlans).where((0, import_drizzle_orm3.eq)(billingPlans.shopDomain, shopDomain)).limit(1);
+    return plan.length > 0 ? plan[0].plan : "free";
+  } catch (error) {
+    console.error("[billing] Error getting user plan:", error);
+    return "free";
+  }
+}
+async function setPlan(shopDomain, plan) {
+  try {
+    const existing = await db.select().from(billingPlans).where((0, import_drizzle_orm3.eq)(billingPlans.shopDomain, shopDomain)).limit(1);
+    if (existing.length > 0) {
+      await db.update(billingPlans).set({
+        plan,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where((0, import_drizzle_orm3.eq)(billingPlans.shopDomain, shopDomain));
+    } else {
+      await db.insert(billingPlans).values({
+        shopDomain,
+        plan,
+        createdAt: /* @__PURE__ */ new Date(),
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+    }
+    console.log(`[billing] Set plan for ${shopDomain}: ${plan}`);
+    await resetUsageForMonth(shopDomain);
+  } catch (error) {
+    console.error("[billing] Error setting plan:", error);
+    throw error;
+  }
+}
+function getCurrentMonth() {
+  const now = /* @__PURE__ */ new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}`;
+}
+async function getOrInitializeUsageTracker(shopDomain) {
+  const month = getCurrentMonth();
+  const plan = await getUserPlan(shopDomain);
+  const existing = await db.select().from(usageTracker).where(
+    (0, import_drizzle_orm3.and)(
+      (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+      (0, import_drizzle_orm3.eq)(usageTracker.month, month)
+    )
+  ).limit(1);
+  if (existing.length > 0) {
+    return existing[0];
+  }
+  const tierConfig = PRICING_TIERS[plan];
+  const limit = Math.max(tierConfig.emailLimit + tierConfig.whatsappLimit, 10);
+  await db.insert(usageTracker).values({
+    shopDomain,
+    plan,
+    emailCount: 0,
+    whatsappCount: 0,
+    month,
+    usageRemaining: limit,
+    createdAt: /* @__PURE__ */ new Date(),
+    updatedAt: /* @__PURE__ */ new Date()
+  });
+  return {
+    shopDomain,
+    plan,
+    emailCount: 0,
+    whatsappCount: 0,
+    month,
+    usageRemaining: limit
+  };
+}
+async function trackEmailUsage(shopDomain) {
+  try {
+    const tracker = await getOrInitializeUsageTracker(shopDomain);
+    await db.update(usageTracker).set({
+      emailCount: tracker.emailCount + 1,
+      usageRemaining: Math.max(tracker.usageRemaining - 1, 0),
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(
+      (0, import_drizzle_orm3.and)(
+        (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+        (0, import_drizzle_orm3.eq)(usageTracker.month, tracker.month)
+      )
+    );
+    console.log(`[billing] Tracked email usage for ${shopDomain}`);
+  } catch (error) {
+    console.error("[billing] Error tracking email usage:", error);
+  }
+}
+async function trackWhatsAppUsage(shopDomain) {
+  try {
+    const tracker = await getOrInitializeUsageTracker(shopDomain);
+    await db.update(usageTracker).set({
+      whatsappCount: tracker.whatsappCount + 1,
+      usageRemaining: Math.max(tracker.usageRemaining - 1, 0),
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(
+      (0, import_drizzle_orm3.and)(
+        (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+        (0, import_drizzle_orm3.eq)(usageTracker.month, tracker.month)
+      )
+    );
+    console.log(`[billing] Tracked WhatsApp usage for ${shopDomain}`);
+  } catch (error) {
+    console.error("[billing] Error tracking WhatsApp usage:", error);
+  }
+}
+async function canSendEmail(shopDomain) {
+  try {
+    const plan = await getUserPlan(shopDomain);
+    const tracker = await getOrInitializeUsageTracker(shopDomain);
+    const tierConfig = PRICING_TIERS[plan];
+    if (tierConfig.emailLimit === -1) {
+      return true;
+    }
+    return tracker.emailCount < tierConfig.emailLimit;
+  } catch (error) {
+    console.error("[billing] Error checking email limit:", error);
+    return false;
+  }
+}
+async function canSendWhatsApp(shopDomain) {
+  try {
+    const plan = await getUserPlan(shopDomain);
+    const tracker = await getOrInitializeUsageTracker(shopDomain);
+    const tierConfig = PRICING_TIERS[plan];
+    if (tierConfig.whatsappLimit === -1) {
+      return true;
+    }
+    return tracker.whatsappCount < tierConfig.whatsappLimit;
+  } catch (error) {
+    console.error("[billing] Error checking WhatsApp limit:", error);
+    return false;
+  }
+}
+async function getRemainingUsage(shopDomain) {
+  try {
+    const plan = await getUserPlan(shopDomain);
+    const tracker = await getOrInitializeUsageTracker(shopDomain);
+    const tierConfig = PRICING_TIERS[plan];
+    const emailLimit = tierConfig.emailLimit === -1 ? "Unlimited" : tierConfig.emailLimit;
+    const whatsappLimit = tierConfig.whatsappLimit === -1 ? "Unlimited" : tierConfig.whatsappLimit;
+    return {
+      plan,
+      emailUsed: tracker.emailCount,
+      emailLimit,
+      whatsappUsed: tracker.whatsappCount,
+      whatsappLimit,
+      month: tracker.month,
+      usageRemaining: tracker.usageRemaining
+    };
+  } catch (error) {
+    console.error("[billing] Error getting remaining usage:", error);
+    return {
+      plan: "free",
+      emailUsed: 0,
+      emailLimit: 10,
+      whatsappUsed: 0,
+      whatsappLimit: 0,
+      month: getCurrentMonth(),
+      usageRemaining: 10
+    };
+  }
+}
+async function resetUsageForMonth(shopDomain) {
+  try {
+    const plan = await getUserPlan(shopDomain);
+    const month = getCurrentMonth();
+    const tierConfig = PRICING_TIERS[plan];
+    const limit = Math.max(tierConfig.emailLimit + tierConfig.whatsappLimit, 10);
+    const existing = await db.select().from(usageTracker).where(
+      (0, import_drizzle_orm3.and)(
+        (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+        (0, import_drizzle_orm3.eq)(usageTracker.month, month)
+      )
+    ).limit(1);
+    if (existing.length > 0) {
+      await db.update(usageTracker).set({
+        plan,
+        emailCount: 0,
+        whatsappCount: 0,
+        usageRemaining: limit,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(
+        (0, import_drizzle_orm3.and)(
+          (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+          (0, import_drizzle_orm3.eq)(usageTracker.month, month)
+        )
+      );
+    }
+    console.log(`[billing] Reset usage for ${shopDomain}: ${month}`);
+  } catch (error) {
+    console.error("[billing] Error resetting usage:", error);
+  }
+}
+var import_drizzle_orm3, PRICING_TIERS;
+var init_billing_service = __esm({
+  "server/billing-service.ts"() {
+    "use strict";
+    init_db();
+    init_schema();
+    import_drizzle_orm3 = require("drizzle-orm");
+    PRICING_TIERS = {
+      free: { plan: "free", emailLimit: 10, whatsappLimit: 0 },
+      pro: { plan: "pro", emailLimit: 500, whatsappLimit: 0 },
+      premium: { plan: "premium", emailLimit: -1, whatsappLimit: 500 }
+      // -1 = unlimited
+    };
+  }
+});
+
+// server/twilio-service.ts
+var twilio_service_exports = {};
+__export(twilio_service_exports, {
+  formatAlertMessage: () => formatAlertMessage,
+  formatBatchedAlertsMessage: () => formatBatchedAlertsMessage,
+  initTwilio: () => initTwilio,
+  isTwilioAvailable: () => isTwilioAvailable,
+  normalizePhoneNumber: () => normalizePhoneNumber,
+  sendWhatsAppMessage: () => sendWhatsAppMessage,
+  validateWhatsAppNumber: () => validateWhatsAppNumber
+});
+function initTwilio(config) {
+  try {
+    const twilio = require("twilio");
+    twilioClient = twilio(config.accountSid, config.authToken);
+    console.log("[twilio] Twilio client initialized");
+  } catch (error) {
+    console.warn("[twilio] Twilio SDK not installed. WhatsApp alerts will be simulated.");
+  }
+}
+function validateWhatsAppNumber(phoneNumber) {
+  const cleaned = phoneNumber.replace(/[\s\-]/g, "");
+  if (cleaned.startsWith("+")) {
+    return /^\+[1-9]\d{1,14}$/.test(cleaned);
+  }
+  return /^[1-9]\d{9,14}$/.test(cleaned);
+}
+function normalizePhoneNumber(phoneNumber) {
+  let normalized = phoneNumber.replace(/[\s\-()]/g, "");
+  if (!normalized.startsWith("+")) {
+    if (!normalized.startsWith("1") && normalized.length === 10) {
+      normalized = "1" + normalized;
+    }
+    normalized = "+" + normalized;
+  }
+  return normalized;
+}
+async function sendWhatsAppMessage(toPhoneNumber, message, maxRetries = 3) {
+  try {
+    if (!validateWhatsAppNumber(toPhoneNumber)) {
+      return {
+        success: false,
+        error: `Invalid phone number format: ${toPhoneNumber}`
+      };
+    }
+    const normalizedNumber = normalizePhoneNumber(toPhoneNumber);
+    if (!twilioClient) {
+      console.log(
+        `[twilio] SIMULATED WhatsApp to ${normalizedNumber}: ${message.substring(
+          0,
+          50
+        )}...`
+      );
+      return {
+        success: true,
+        messageId: `simulated_${Date.now()}`
+      };
+    }
+    let lastError;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await twilioClient.messages.create({
+          from: `whatsapp:${normalizePhoneNumber(process.env.TWILIO_WHATSAPP_FROM || "")}`,
+          to: `whatsapp:${normalizedNumber}`,
+          body: message
+        });
+        console.log(
+          `[twilio] WhatsApp sent to ${normalizedNumber}: ${response.sid}`
+        );
+        return {
+          success: true,
+          messageId: response.sid
+        };
+      } catch (error) {
+        lastError = error;
+        console.warn(
+          `[twilio] Attempt ${attempt}/${maxRetries} failed: ${error.message}`
+        );
+        if (attempt < maxRetries) {
+          await new Promise(
+            (resolve) => setTimeout(resolve, Math.pow(2, attempt - 1) * 1e3)
+          );
+        }
+      }
+    }
+    return {
+      success: false,
+      error: `Failed to send after ${maxRetries} attempts: ${lastError?.message}`
+    };
+  } catch (error) {
+    console.error("[twilio] Error sending WhatsApp:", error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+}
+function formatAlertMessage(productName, currentQuantity, threshold, locationName) {
+  const location = locationName ? ` at ${locationName}` : "";
+  return `\u{1F6A8} Low Stock Alert!
+
+Product: ${productName}${location}
+Current Stock: ${currentQuantity} units
+Alert Threshold: ${threshold} units
+
+Please restock as soon as possible.`;
+}
+function formatBatchedAlertsMessage(alerts2) {
+  let message = `\u{1F4E6} Inventory Batch Alert
+
+${alerts2.length} products need attention:
+
+`;
+  alerts2.forEach((alert, index) => {
+    const location = alert.location ? ` (${alert.location})` : "";
+    message += `${index + 1}. ${alert.productName}${location}
+`;
+    message += `   Stock: ${alert.quantity} / ${alert.threshold}
+`;
+  });
+  message += `
+Please review your inventory.`;
+  return message;
+}
+function isTwilioAvailable() {
+  return twilioClient !== null;
+}
+var twilioClient;
+var init_twilio_service = __esm({
+  "server/twilio-service.ts"() {
+    "use strict";
+    twilioClient = null;
+  }
+});
+
+// server/routes/billing.ts
+var billing_exports = {};
+__export(billing_exports, {
+  setupBillingRoutes: () => setupBillingRoutes
+});
+function setupBillingRoutes(router) {
+  router.get("/api/billing/plan", async (req, res) => {
+    try {
+      const shop = req.query.shop;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+      const plan = await getUserPlan(shop);
+      const usage = await getRemainingUsage(shop);
+      res.json({
+        plan,
+        usage,
+        tiers: PRICING_TIERS
+      });
+    } catch (error) {
+      console.error("[billing-api] Error getting plan:", error);
+      res.status(500).json({ error: "Failed to get billing plan" });
+    }
+  });
+  router.get("/api/billing/usage", async (req, res) => {
+    try {
+      const shop = req.query.shop;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+      const usage = await getRemainingUsage(shop);
+      res.json({
+        month: usage.month,
+        emailUsed: usage.emailUsed,
+        emailLimit: usage.emailLimit,
+        whatsappUsed: usage.whatsappUsed,
+        whatsappLimit: usage.whatsappLimit,
+        percentageUsed: typeof usage.emailLimit === "string" ? "N/A" : Math.round(usage.emailUsed / usage.emailLimit * 100)
+      });
+    } catch (error) {
+      console.error("[billing-api] Error getting usage:", error);
+      res.status(500).json({ error: "Failed to get usage statistics" });
+    }
+  });
+  router.post("/api/billing/upgrade", async (req, res) => {
+    try {
+      const { shop, plan } = req.body;
+      if (!shop || !plan) {
+        return res.status(400).json({ error: "Missing shop or plan parameter" });
+      }
+      if (!["free", "pro", "premium"].includes(plan)) {
+        return res.status(400).json({ error: "Invalid plan" });
+      }
+      await setPlan(shop, plan);
+      res.json({
+        success: true,
+        message: `Plan upgraded to ${plan}`,
+        plan
+      });
+    } catch (error) {
+      console.error("[billing-api] Error upgrading plan:", error);
+      res.status(500).json({ error: "Failed to upgrade plan" });
+    }
+  });
+  router.post("/api/billing/settings", async (req, res) => {
+    try {
+      const { shop, whatsappNumber, batchingEnabled, batchingInterval, emailAlertsEnabled } = req.body;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+      if (whatsappNumber) {
+        const phoneRegex = /^\+[1-9]\d{1,14}$/;
+        if (!phoneRegex.test(whatsappNumber.replace(/[\s\-]/g, ""))) {
+          return res.status(400).json({ error: "Invalid phone number format" });
+        }
+      }
+      const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm7.eq)(shopSettings.shopDomain, shop)).limit(1);
+      if (existing.length > 0) {
+        await db.update(shopSettings).set({
+          whatsappNumber: whatsappNumber || existing[0].whatsappNumber,
+          batchingEnabled: batchingEnabled !== void 0 ? batchingEnabled : existing[0].batchingEnabled,
+          batchingInterval: batchingInterval || existing[0].batchingInterval,
+          emailAlertsEnabled: emailAlertsEnabled !== void 0 ? emailAlertsEnabled : existing[0].emailAlertsEnabled,
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where((0, import_drizzle_orm7.eq)(shopSettings.shopDomain, shop));
+      } else {
+        await db.insert(shopSettings).values({
+          shopDomain: shop,
+          whatsappNumber: whatsappNumber || null,
+          batchingEnabled: batchingEnabled ?? false,
+          batchingInterval: batchingInterval || "daily",
+          emailAlertsEnabled: emailAlertsEnabled ?? true,
+          isOnboarded: false,
+          createdAt: /* @__PURE__ */ new Date(),
+          updatedAt: /* @__PURE__ */ new Date()
+        });
+      }
+      res.json({
+        success: true,
+        message: "Settings updated"
+      });
+    } catch (error) {
+      console.error("[billing-api] Error updating settings:", error);
+      res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
+  router.get("/api/billing/settings", async (req, res) => {
+    try {
+      const shop = req.query.shop;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm7.eq)(shopSettings.shopDomain, shop)).limit(1);
+      if (!settings.length) {
+        return res.json({
+          whatsappNumber: null,
+          batchingEnabled: false,
+          batchingInterval: "daily",
+          emailAlertsEnabled: true,
+          isOnboarded: false
+        });
+      }
+      const s = settings[0];
+      res.json({
+        whatsappNumber: s.whatsappNumber,
+        batchingEnabled: s.batchingEnabled,
+        batchingInterval: s.batchingInterval,
+        emailAlertsEnabled: s.emailAlertsEnabled,
+        isOnboarded: s.isOnboarded
+      });
+    } catch (error) {
+      console.error("[billing-api] Error getting settings:", error);
+      res.status(500).json({ error: "Failed to get settings" });
+    }
+  });
+}
+var import_drizzle_orm7;
+var init_billing = __esm({
+  "server/routes/billing.ts"() {
+    "use strict";
+    init_billing_service();
+    init_db();
+    init_schema();
+    import_drizzle_orm7 = require("drizzle-orm");
+  }
+});
+
+// server/routes/onboarding.ts
+var onboarding_exports = {};
+__export(onboarding_exports, {
+  setupOnboardingRoutes: () => setupOnboardingRoutes
+});
+function setupOnboardingRoutes(router) {
+  router.post(
+    "/api/onboarding/complete",
+    async (req, res) => {
+      try {
+        const {
+          shop,
+          plan,
+          thresholdType,
+          thresholdValue,
+          notificationMethod,
+          whatsappNumber,
+          batchingEnabled,
+          batchingInterval
+        } = req.body;
+        if (!shop) {
+          return res.status(400).json({ error: "Missing shop parameter" });
+        }
+        if (!["free", "pro", "premium"].includes(plan)) {
+          return res.status(400).json({ error: "Invalid plan" });
+        }
+        if (!["quantity", "percentage"].includes(thresholdType)) {
+          return res.status(400).json({ error: "Invalid threshold type" });
+        }
+        if (!["email", "whatsapp", "both"].includes(notificationMethod)) {
+          return res.status(400).json({ error: "Invalid notification method" });
+        }
+        if (!["hourly", "daily", "weekly"].includes(batchingInterval)) {
+          return res.status(400).json({ error: "Invalid batching interval" });
+        }
+        if (notificationMethod === "whatsapp" || notificationMethod === "both") {
+          if (!whatsappNumber) {
+            return res.status(400).json({ error: "WhatsApp number required for selected method" });
+          }
+          const phoneRegex = /^\+[1-9]\d{1,14}$/;
+          const cleaned = whatsappNumber.replace(/[\s\-()]/g, "");
+          if (!phoneRegex.test("+" + cleaned.replace(/^\+/, ""))) {
+            return res.status(400).json({ error: "Invalid phone number" });
+          }
+        }
+        await setPlan(shop, plan);
+        const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop)).limit(1);
+        if (existing.length > 0) {
+          await db.update(shopSettings).set({
+            whatsappNumber: notificationMethod === "email" ? null : whatsappNumber,
+            batchingEnabled,
+            batchingInterval,
+            emailAlertsEnabled: notificationMethod !== "whatsapp",
+            isOnboarded: true,
+            updatedAt: /* @__PURE__ */ new Date()
+          }).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop));
+        } else {
+          await db.insert(shopSettings).values({
+            shopDomain: shop,
+            whatsappNumber: notificationMethod === "email" ? null : whatsappNumber,
+            batchingEnabled,
+            batchingInterval,
+            emailAlertsEnabled: notificationMethod !== "whatsapp",
+            isOnboarded: true,
+            createdAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          });
+        }
+        console.log(
+          `[onboarding] Completed for ${shop}: plan=${plan}, threshold=${thresholdType}:${thresholdValue}`
+        );
+        res.json({
+          success: true,
+          message: "Onboarding completed",
+          shop,
+          plan
+        });
+      } catch (error) {
+        console.error("[onboarding] Error completing onboarding:", error);
+        res.status(500).json({ error: "Failed to complete onboarding" });
+      }
+    }
+  );
+  router.get("/api/onboarding/status", async (req, res) => {
+    try {
+      const shop = req.query.shop;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop)).limit(1);
+      if (!settings.length) {
+        return res.json({
+          isOnboarded: false,
+          message: "Please complete onboarding"
+        });
+      }
+      res.json({
+        isOnboarded: settings[0].isOnboarded,
+        plan: settings[0]
+      });
+    } catch (error) {
+      console.error("[onboarding] Error checking status:", error);
+      res.status(500).json({ error: "Failed to check onboarding status" });
+    }
+  });
+}
+var import_drizzle_orm8;
+var init_onboarding = __esm({
+  "server/routes/onboarding.ts"() {
+    "use strict";
+    init_db();
+    init_schema();
+    import_drizzle_orm8 = require("drizzle-orm");
+    init_billing_service();
+  }
+});
+
+// server/batching-service.ts
+var batching_service_exports = {};
+__export(batching_service_exports, {
+  addToBatch: () => addToBatch,
+  getPendingBatches: () => getPendingBatches,
+  processPendingBatches: () => processPendingBatches,
+  sendBatch: () => sendBatch,
+  startBatchingProcessor: () => startBatchingProcessor
+});
+async function addToBatch(shop, alertId, productId, locationId, quantity, threshold, alertType) {
+  try {
+    const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop)).limit(1);
+    if (!settings.length || !settings[0].batchingEnabled) {
+      console.log(
+        `[batching] Batching disabled for ${shop}, skipping queue`
+      );
+      return;
+    }
+    const interval = BATCH_INTERVALS[settings[0].batchingInterval] || BATCH_INTERVALS.daily;
+    const scheduledFor = new Date(Date.now() + interval);
+    await db.insert(batchingQueue).values({
+      shopDomain: shop,
+      alertId,
+      productId,
+      locationId,
+      quantity,
+      threshold,
+      alertType,
+      status: "pending",
+      scheduledFor,
+      createdAt: /* @__PURE__ */ new Date()
+    });
+    console.log(
+      `[batching] Added alert ${alertId} to batch queue for ${shop}`
+    );
+  } catch (error) {
+    console.error("[batching] Error adding to batch:", error);
+  }
+}
+async function getPendingBatches(shop) {
+  try {
+    const now = /* @__PURE__ */ new Date();
+    let query = db.select().from(batchingQueue).where(
+      (0, import_drizzle_orm9.and)(
+        (0, import_drizzle_orm9.eq)(batchingQueue.status, "pending"),
+        (0, import_drizzle_orm9.lte)(batchingQueue.scheduledFor, now)
+      )
+    );
+    const pending = await query;
+    let filtered = pending;
+    if (shop) {
+      filtered = pending.filter((item) => item.shopDomain === shop);
+    }
+    const grouped = /* @__PURE__ */ new Map();
+    for (const item of filtered) {
+      const key = `${item.shopDomain}__${item.alertType}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+      }
+      grouped.get(key).push(item);
+    }
+    return grouped;
+  } catch (error) {
+    console.error("[batching] Error getting pending batches:", error);
+    return /* @__PURE__ */ new Map();
+  }
+}
+async function formatWhatsAppBatch(alerts2) {
+  return alerts2.map((alert) => ({
+    productName: `Product ${alert.productId.substring(0, 8)}...`,
+    quantity: alert.quantity,
+    threshold: alert.threshold,
+    location: alert.locationId || void 0
+  }));
+}
+async function sendBatch(shop, alertType) {
+  try {
+    const pending = await db.select().from(batchingQueue).where(
+      (0, import_drizzle_orm9.and)(
+        (0, import_drizzle_orm9.eq)(batchingQueue.shopDomain, shop),
+        (0, import_drizzle_orm9.eq)(batchingQueue.alertType, alertType),
+        (0, import_drizzle_orm9.eq)(batchingQueue.status, "pending")
+      )
+    );
+    if (!pending.length) {
+      console.log(
+        `[batching] No pending ${alertType} alerts for ${shop}`
+      );
+      return;
+    }
+    if (alertType === "whatsapp") {
+      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop)).limit(1);
+      if (!settings.length || !settings[0].whatsappNumber) {
+        console.warn(
+          `[batching] No WhatsApp number configured for ${shop}`
+        );
+        for (const alert of pending) {
+          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
+        }
+        return;
+      }
+      const formatted = await formatWhatsAppBatch(pending);
+      const message = formatBatchedAlertsMessage(formatted);
+      const result = await sendWhatsAppMessage(
+        settings[0].whatsappNumber,
+        message
+      );
+      if (result.success) {
+        const now = /* @__PURE__ */ new Date();
+        for (const alert of pending) {
+          await db.update(batchingQueue).set({
+            status: "sent",
+            sentAt: now
+          }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
+        }
+        console.log(
+          `[batching] Sent ${pending.length} WhatsApp alerts for ${shop}`
+        );
+      } else {
+        for (const alert of pending) {
+          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
+        }
+        console.error(`[batching] Failed to send batch for ${shop}`);
+      }
+    } else if (alertType === "email") {
+      console.log(
+        `[batching] Email batch sending stub for ${shop}: ${pending.length} alerts`
+      );
+      const now = /* @__PURE__ */ new Date();
+      for (const alert of pending) {
+        await db.update(batchingQueue).set({
+          status: "sent",
+          sentAt: now
+        }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
+      }
+    }
+  } catch (error) {
+    console.error(`[batching] Error sending batch for ${shop}:`, error);
+  }
+}
+async function processPendingBatches() {
+  try {
+    const batches = await getPendingBatches();
+    for (const [key, alerts2] of batches.entries()) {
+      const [shop, alertType] = key.split("__");
+      if (!shop || !alertType) continue;
+      console.log(
+        `[batching] Processing batch for ${shop} (${alertType}): ${alerts2.length} alerts`
+      );
+      await sendBatch(shop, alertType);
+    }
+  } catch (error) {
+    console.error("[batching] Error processing pending batches:", error);
+  }
+}
+function startBatchingProcessor(intervalMs = 5 * 60 * 1e3) {
+  console.log(
+    `[batching] Starting batch processor (interval: ${intervalMs}ms)`
+  );
+  const timer = setInterval(() => {
+    processPendingBatches().catch((err) => {
+      console.error("[batching] Batch processor error:", err);
+    });
+  }, intervalMs);
+  return timer;
+}
+var import_drizzle_orm9, BATCH_INTERVALS;
+var init_batching_service = __esm({
+  "server/batching-service.ts"() {
+    "use strict";
+    init_db();
+    init_schema();
+    import_drizzle_orm9 = require("drizzle-orm");
+    init_twilio_service();
+    BATCH_INTERVALS = {
+      hourly: 60 * 60 * 1e3,
+      daily: 24 * 60 * 60 * 1e3,
+      weekly: 7 * 24 * 60 * 60 * 1e3
+    };
   }
 });
 
@@ -477,20 +1333,39 @@ var import_bull = __toESM(require("bull"), 1);
 // server/webhook-processors.ts
 init_db();
 init_schema();
-var import_drizzle_orm4 = require("drizzle-orm");
+var import_drizzle_orm5 = require("drizzle-orm");
 
 // server/alerts.ts
 init_db();
 init_schema();
-var import_drizzle_orm3 = require("drizzle-orm");
+var import_drizzle_orm4 = require("drizzle-orm");
+init_billing_service();
+init_twilio_service();
+async function calculateEffectiveThreshold(productId, currentQuantity) {
+  try {
+    const product = await db.select().from(products).where((0, import_drizzle_orm4.eq)(products.shopifyProductId, productId)).limit(1);
+    if (!product.length) {
+      return currentQuantity;
+    }
+    const prod = product[0];
+    if (prod.thresholdType === "percentage" && prod.safetyStock) {
+      const percentage = (prod.thresholdValue || 20) / 100;
+      return Math.floor(prod.safetyStock * percentage);
+    }
+    return prod.thresholdValue || 5;
+  } catch (error) {
+    console.error("[alerts] Error calculating threshold:", error);
+    return 5;
+  }
+}
 async function createLowStockAlert(shop, productId, locationId, quantity, threshold) {
   try {
     const alertId = `${shop}__${productId}__${locationId}__${Date.now()}`;
     const existing = await db.select().from(alerts).where(
-      (0, import_drizzle_orm3.and)(
-        (0, import_drizzle_orm3.eq)(alerts.shopDomain, shop),
-        (0, import_drizzle_orm3.eq)(alerts.productId, productId),
-        (0, import_drizzle_orm3.eq)(alerts.status, "active")
+      (0, import_drizzle_orm4.and)(
+        (0, import_drizzle_orm4.eq)(alerts.shopDomain, shop),
+        (0, import_drizzle_orm4.eq)(alerts.productId, productId),
+        (0, import_drizzle_orm4.eq)(alerts.status, "active")
       )
     ).limit(1);
     if (existing.length > 0) {
@@ -522,7 +1397,7 @@ async function resolveAlert(alertId) {
     await db.update(alerts).set({
       status: "resolved",
       resolvedAt: /* @__PURE__ */ new Date()
-    }).where((0, import_drizzle_orm3.eq)(alerts.id, alertId));
+    }).where((0, import_drizzle_orm4.eq)(alerts.id, alertId));
     console.log(`[alerts] Resolved alert ${alertId}`);
   } catch (error) {
     console.error("[alerts] Error resolving alert:", error);
@@ -532,11 +1407,11 @@ async function resolveAlert(alertId) {
 async function getActiveAlerts(shop) {
   try {
     const shopAlerts = await db.select().from(alerts).where(
-      (0, import_drizzle_orm3.and)((0, import_drizzle_orm3.eq)(alerts.shopDomain, shop), (0, import_drizzle_orm3.eq)(alerts.status, "active"))
+      (0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(alerts.shopDomain, shop), (0, import_drizzle_orm4.eq)(alerts.status, "active"))
     );
     const enriched = await Promise.all(
       shopAlerts.map(async (alert) => {
-        const product = await db.select().from(products).where((0, import_drizzle_orm3.eq)(products.shopifyProductId, alert.productId)).limit(1);
+        const product = await db.select().from(products).where((0, import_drizzle_orm4.eq)(products.shopifyProductId, alert.productId)).limit(1);
         return {
           ...alert,
           product: product[0] || null
@@ -549,8 +1424,55 @@ async function getActiveAlerts(shop) {
     return [];
   }
 }
-async function checkInventoryAlert(shop, productId, locationId, quantity, threshold) {
+async function sendEmailAlert(shop, productName, quantity, threshold, locationName) {
   try {
+    const canSend = await canSendEmail(shop);
+    if (!canSend) {
+      console.warn(`[alerts] Email limit reached for ${shop}`);
+      return false;
+    }
+    await trackEmailUsage(shop);
+    console.log(
+      `[alerts] Email alert queued for ${shop}: ${productName} (${quantity}/${threshold})`
+    );
+    return true;
+  } catch (error) {
+    console.error("[alerts] Error sending email alert:", error);
+    return false;
+  }
+}
+async function sendWhatsAppAlert(shop, productName, quantity, threshold, locationName) {
+  try {
+    const canSend = await canSendWhatsApp(shop);
+    if (!canSend) {
+      console.warn(`[alerts] WhatsApp limit reached for ${shop}`);
+      return false;
+    }
+    const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm4.eq)(shopSettings.shopDomain, shop)).limit(1);
+    if (!settings.length || !settings[0].whatsappNumber) {
+      console.warn(`[alerts] No WhatsApp number configured for ${shop}`);
+      return false;
+    }
+    const message = formatAlertMessage(productName, quantity, threshold, locationName);
+    const result = await sendWhatsAppMessage(settings[0].whatsappNumber, message);
+    if (result.success) {
+      await trackWhatsAppUsage(shop);
+      console.log(`[alerts] WhatsApp alert sent for ${shop}: ${result.messageId}`);
+      return true;
+    } else {
+      console.error(
+        `[alerts] Failed to send WhatsApp: ${result.error}`
+      );
+      return false;
+    }
+  } catch (error) {
+    console.error("[alerts] Error sending WhatsApp alert:", error);
+    return false;
+  }
+}
+async function checkInventoryAlert(shop, productId, locationId, quantity, _legacyThreshold) {
+  try {
+    const threshold = await calculateEffectiveThreshold(productId, quantity);
     if (quantity <= threshold) {
       const alertId = await createLowStockAlert(
         shop,
@@ -559,15 +1481,22 @@ async function checkInventoryAlert(shop, productId, locationId, quantity, thresh
         quantity,
         threshold
       );
-      console.log(
-        `[alerts] Alert created for low inventory: ${alertId}`
-      );
+      const product = await db.select().from(products).where((0, import_drizzle_orm4.eq)(products.shopifyProductId, productId)).limit(1);
+      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm4.eq)(shopSettings.shopDomain, shop)).limit(1);
+      const productName = product.length ? product[0].title : "Unknown Product";
+      if (settings.length && settings[0].emailAlertsEnabled) {
+        await sendEmailAlert(shop, productName, quantity, threshold);
+      }
+      if (settings.length && settings[0].whatsappNumber && !settings[0].batchingEnabled) {
+        await sendWhatsAppAlert(shop, productName, quantity, threshold);
+      }
+      console.log(`[alerts] Alert created for low inventory: ${alertId}`);
     } else {
       const existing = await db.select().from(alerts).where(
-        (0, import_drizzle_orm3.and)(
-          (0, import_drizzle_orm3.eq)(alerts.shopDomain, shop),
-          (0, import_drizzle_orm3.eq)(alerts.productId, productId),
-          (0, import_drizzle_orm3.eq)(alerts.status, "active")
+        (0, import_drizzle_orm4.and)(
+          (0, import_drizzle_orm4.eq)(alerts.shopDomain, shop),
+          (0, import_drizzle_orm4.eq)(alerts.productId, productId),
+          (0, import_drizzle_orm4.eq)(alerts.status, "active")
         )
       );
       for (const alert of existing) {
@@ -613,7 +1542,7 @@ async function processProductUpdate(shop, payload) {
       handle,
       imageUrl: image?.src || null,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where((0, import_drizzle_orm4.eq)(products.id, productId));
+    }).where((0, import_drizzle_orm5.eq)(products.id, productId));
     console.log(
       `[webhook] Updated product "${title}" (${id}) for ${shop}`
     );
@@ -635,16 +1564,16 @@ async function processInventoryUpdate(shop, payload) {
     }
     const inventoryId = `${shop}__${inventoryItemId}__${locationId}`;
     const existing = await db.select().from(inventory).where(
-      (0, import_drizzle_orm4.and)(
-        (0, import_drizzle_orm4.eq)(inventory.shopDomain, shop),
-        (0, import_drizzle_orm4.eq)(inventory.locationId, String(locationId))
+      (0, import_drizzle_orm5.and)(
+        (0, import_drizzle_orm5.eq)(inventory.shopDomain, shop),
+        (0, import_drizzle_orm5.eq)(inventory.locationId, String(locationId))
       )
     ).limit(1);
     if (existing.length > 0) {
       await db.update(inventory).set({
         quantity: quantity || 0,
         lastUpdated: new Date(updatedAt)
-      }).where((0, import_drizzle_orm4.eq)(inventory.id, existing[0].id));
+      }).where((0, import_drizzle_orm5.eq)(inventory.id, existing[0].id));
       console.log(
         `[webhook] Updated inventory: ${inventoryItemId} at location ${locationId} = ${quantity}`
       );
@@ -780,7 +1709,7 @@ initializeQueue();
 // server/shopify-api.ts
 init_db();
 init_schema();
-var import_drizzle_orm5 = require("drizzle-orm");
+var import_drizzle_orm6 = require("drizzle-orm");
 async function fetchShopifyProducts(shop, accessToken) {
   try {
     const client = new shopify.clients.Rest({
@@ -840,14 +1769,14 @@ async function syncProducts(shop, accessToken) {
       const title = product.title;
       const handle = product.handle;
       const imageUrl = product.image?.src || null;
-      const existing = await db.select().from(products).where((0, import_drizzle_orm5.eq)(products.id, productId)).limit(1);
+      const existing = await db.select().from(products).where((0, import_drizzle_orm6.eq)(products.id, productId)).limit(1);
       if (existing.length > 0) {
         await db.update(products).set({
           title,
           handle,
           imageUrl,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm5.eq)(products.id, productId));
+        }).where((0, import_drizzle_orm6.eq)(products.id, productId));
         updated++;
       } else {
         await db.insert(products).values({
@@ -913,12 +1842,12 @@ async function syncInventoryForItem(shop, accessToken, inventoryItemId, productI
         const locationId = level.location_id;
         const quantity = level.available || 0;
         const inventoryId = `${shop}__${inventoryItemId}__${locationId}`;
-        const existing = await db.select().from(inventory).where((0, import_drizzle_orm5.eq)(inventory.id, inventoryId)).limit(1);
+        const existing = await db.select().from(inventory).where((0, import_drizzle_orm6.eq)(inventory.id, inventoryId)).limit(1);
         if (existing.length > 0) {
           await db.update(inventory).set({
             quantity,
             lastUpdated: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm5.eq)(inventory.id, inventoryId));
+          }).where((0, import_drizzle_orm6.eq)(inventory.id, inventoryId));
         } else {
           await db.insert(inventory).values({
             id: inventoryId,
@@ -1094,11 +2023,11 @@ async function registerRoutes(httpServer2, app2) {
         const session = req.shopifySession;
         const { db: database } = await Promise.resolve().then(() => (init_db(), db_exports));
         const { products: productsTable, inventory: inventoryTable } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-        const { eq: eq5 } = await import("drizzle-orm");
-        const shopProducts = await database.select().from(productsTable).where(eq5(productsTable.shopDomain, session.shop));
+        const { eq: eq9 } = await import("drizzle-orm");
+        const shopProducts = await database.select().from(productsTable).where(eq9(productsTable.shopDomain, session.shop));
         const productsWithInventory = await Promise.all(
           shopProducts.map(async (product) => {
-            const inventoryRecords = await database.select().from(inventoryTable).where(eq5(inventoryTable.productId, product.shopifyProductId));
+            const inventoryRecords = await database.select().from(inventoryTable).where(eq9(inventoryTable.productId, product.shopifyProductId));
             return {
               ...product,
               inventory: inventoryRecords
@@ -1147,8 +2076,8 @@ async function registerRoutes(httpServer2, app2) {
         const session = req.shopifySession;
         const { db: database } = await Promise.resolve().then(() => (init_db(), db_exports));
         const { alerts: alertsTable } = await Promise.resolve().then(() => (init_schema(), schema_exports));
-        const { eq: eq5 } = await import("drizzle-orm");
-        const alertResult = await database.select().from(alertsTable).where(eq5(alertsTable.id, alertId)).limit(1);
+        const { eq: eq9 } = await import("drizzle-orm");
+        const alertResult = await database.select().from(alertsTable).where(eq9(alertsTable.id, alertId)).limit(1);
         if (alertResult.length === 0) {
           res.status(404).json({ error: "Alert not found" });
           return;
@@ -1247,6 +2176,15 @@ async function registerRoutes(httpServer2, app2) {
     }
   );
   console.log("[routes] Auth, shop, and webhook routes registered");
+  try {
+    const { setupBillingRoutes: setupBillingRoutes2 } = await Promise.resolve().then(() => (init_billing(), billing_exports));
+    const { setupOnboardingRoutes: setupOnboardingRoutes2 } = await Promise.resolve().then(() => (init_onboarding(), onboarding_exports));
+    setupBillingRoutes2(app2);
+    setupOnboardingRoutes2(app2);
+    console.log("[routes] Billing and onboarding routes registered");
+  } catch (error) {
+    console.error("[routes] Failed to register billing/onboarding routes:", error);
+  }
   return httpServer2;
 }
 
@@ -1292,6 +2230,30 @@ app.use((req, res, next) => {
   next();
 });
 (async () => {
+  try {
+    const { initTwilio: initTwilio2 } = await Promise.resolve().then(() => (init_twilio_service(), twilio_service_exports));
+    const twilioConfig = {
+      accountSid: process.env.TWILIO_ACCOUNT_SID || "",
+      authToken: process.env.TWILIO_AUTH_TOKEN || "",
+      whatsappFrom: process.env.TWILIO_WHATSAPP_FROM || ""
+    };
+    if (twilioConfig.accountSid && twilioConfig.authToken) {
+      initTwilio2(twilioConfig);
+      log("Twilio initialized for WhatsApp alerts");
+    } else {
+      log("Twilio credentials not configured, WhatsApp alerts will be simulated");
+    }
+  } catch (error) {
+    console.error("Failed to initialize Twilio:", error);
+  }
+  try {
+    const { startBatchingProcessor: startBatchingProcessor2 } = await Promise.resolve().then(() => (init_batching_service(), batching_service_exports));
+    const batchingTimer = startBatchingProcessor2(5 * 60 * 1e3);
+    global.batchingTimer = batchingTimer;
+    log("Batching processor started");
+  } catch (error) {
+    console.error("Failed to initialize batching processor:", error);
+  }
   await registerRoutes(httpServer, app);
   app.use((err, _req, res, next) => {
     const status = err.status || err.statusCode || 500;
@@ -1329,6 +2291,10 @@ app.use((req, res, next) => {
   );
   process.on("SIGTERM", async () => {
     log("SIGTERM received, shutting down gracefully...");
+    if (global.batchingTimer) {
+      clearInterval(global.batchingTimer);
+      log("Batching processor stopped");
+    }
     await closeWebhookQueue();
     httpServer.close(() => {
       log("Server closed");
@@ -1337,6 +2303,10 @@ app.use((req, res, next) => {
   });
   process.on("SIGINT", async () => {
     log("SIGINT received, shutting down gracefully...");
+    if (global.batchingTimer) {
+      clearInterval(global.batchingTimer);
+      log("Batching processor stopped");
+    }
     await closeWebhookQueue();
     httpServer.close(() => {
       log("Server closed");
