@@ -61,6 +61,37 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Initialize Twilio (Phase 3)
+  try {
+    const { initTwilio } = await import("./twilio-service");
+    const twilioConfig = {
+      accountSid: process.env.TWILIO_ACCOUNT_SID || "",
+      authToken: process.env.TWILIO_AUTH_TOKEN || "",
+      whatsappFrom: process.env.TWILIO_WHATSAPP_FROM || "",
+    };
+    
+    if (twilioConfig.accountSid && twilioConfig.authToken) {
+      initTwilio(twilioConfig);
+      log("Twilio initialized for WhatsApp alerts");
+    } else {
+      log("Twilio credentials not configured, WhatsApp alerts will be simulated");
+    }
+  } catch (error) {
+    console.error("Failed to initialize Twilio:", error);
+  }
+
+  // Initialize batching processor (Phase 5)
+  try {
+    const { startBatchingProcessor } = await import("./batching-service");
+    const batchingTimer = startBatchingProcessor(5 * 60 * 1000); // Process every 5 minutes
+    
+    // Store timer for cleanup on shutdown
+    (global as any).batchingTimer = batchingTimer;
+    log("Batching processor started");
+  } catch (error) {
+    console.error("Failed to initialize batching processor:", error);
+  }
+
   // Register all routes
   await registerRoutes(httpServer, app);
 
@@ -112,6 +143,13 @@ app.use((req, res, next) => {
   // Graceful shutdown
   process.on("SIGTERM", async () => {
     log("SIGTERM received, shutting down gracefully...");
+    
+    // Clear batching timer
+    if ((global as any).batchingTimer) {
+      clearInterval((global as any).batchingTimer);
+      log("Batching processor stopped");
+    }
+    
     await closeWebhookQueue();
     httpServer.close(() => {
       log("Server closed");
@@ -121,6 +159,13 @@ app.use((req, res, next) => {
 
   process.on("SIGINT", async () => {
     log("SIGINT received, shutting down gracefully...");
+    
+    // Clear batching timer
+    if ((global as any).batchingTimer) {
+      clearInterval((global as any).batchingTimer);
+      log("Batching processor stopped");
+    }
+    
     await closeWebhookQueue();
     httpServer.close(() => {
       log("Server closed");

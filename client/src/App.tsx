@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
+import Onboarding from "./pages/Onboarding";
+import Dashboard from "./pages/Dashboard";
 
 export default function App() {
   const [shop, setShop] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOnboarded, setIsOnboarded] = useState(false);
+  const [page, setPage] = useState<"install" | "authorize" | "onboard" | "dashboard">("install");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -19,7 +23,7 @@ export default function App() {
       if (hostParam) {
         console.log(`[app] Embedded app context detected, trusting Shopify session`);
         setAuthenticated(true);
-        setLoading(false);
+        checkOnboardingStatus(shopParam);
         return;
       }
 
@@ -40,14 +44,40 @@ export default function App() {
       if (data.installed) {
         console.log(`[app] App is installed for ${shopDomain}`);
         setAuthenticated(true);
+        checkOnboardingStatus(shopDomain);
       } else {
         console.log(`[app] App not installed for ${shopDomain}, needs OAuth`);
         setAuthenticated(false);
+        setPage("authorize");
+        setLoading(false);
       }
     } catch (error) {
       console.error("[app] Installation check failed:", error);
       setError("Failed to check installation status");
       setAuthenticated(false);
+      setPage("authorize");
+      setLoading(false);
+    }
+  };
+
+  const checkOnboardingStatus = async (shopDomain: string) => {
+    try {
+      const response = await fetch(`/api/onboarding/status?shop=${shopDomain}`);
+      const data = await response.json();
+
+      if (data.isOnboarded) {
+        console.log(`[app] Onboarding complete for ${shopDomain}`);
+        setIsOnboarded(true);
+        setPage("dashboard");
+      } else {
+        console.log(`[app] Onboarding required for ${shopDomain}`);
+        setIsOnboarded(false);
+        setPage("onboard");
+      }
+    } catch (error) {
+      console.error("[app] Onboarding check failed:", error);
+      // If check fails, go to onboarding
+      setPage("onboard");
     } finally {
       setLoading(false);
     }
@@ -96,7 +126,7 @@ export default function App() {
     );
   }
 
-  if (!shop) {
+  if (page === "install") {
     return (
       <div className="container">
         <div className="card">
@@ -116,7 +146,7 @@ export default function App() {
     );
   }
 
-  if (!authenticated) {
+  if (page === "authorize") {
     return (
       <div className="container">
         <div className="card">
@@ -134,15 +164,13 @@ export default function App() {
     );
   }
 
-  return (
-    <div className="container">
-      <div className="card">
-        <h2>Welcome to Low Stock Alerts! 🎉</h2>
-        <p>Store: <strong>{shop}</strong></p>
-        <p style={{ marginTop: "20px", color: "#666" }}>
-          Dashboard and inventory monitoring coming soon...
-        </p>
-      </div>
-    </div>
-  );
+  if (page === "onboard") {
+    return <Onboarding />;
+  }
+
+  if (page === "dashboard") {
+    return <Dashboard shop={shop} />;
+  }
+
+  return null;
 }

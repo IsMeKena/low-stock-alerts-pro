@@ -455,5 +455,18 @@ export async function registerRoutes(
 
   console.log("[routes] Auth, shop, and webhook routes registered");
 
+  // Register billing and onboarding routes
+  try {
+    const { setupBillingRoutes } = await import("./routes/billing");
+    const { setupOnboardingRoutes } = await import("./routes/onboarding");
+    
+    setupBillingRoutes(app);
+    setupOnboardingRoutes(app);
+    
+    console.log("[routes] Billing and onboarding routes registered");
+  } catch (error) {
+    console.error("[routes] Failed to register billing/onboarding routes:", error);
+  }
+
   return httpServer;
 }
