@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { sql } from "drizzle-orm";
 import { join } from "path";
 import fs from "fs";
 import * as schema from "@shared/schema.ts";
@@ -21,6 +22,66 @@ export const client = pool;
 
 
 /**
+ * Clean up old corrupted tables from failed migrations.
+ * These block new migrations from running cleanly.
+ */
+async function cleanupOldTables() {
+  try {
+    console.log("[db] >>> CLEANUP: Checking for old corrupted tables <<<");
+    
+    // List of old tables that shouldn't exist anymore
+    const oldTables = [
+      "alert_logs",
+      "inventory_levels",
+      "inventory_level",
+      "alerts_log",
+      "old_alerts",
+      "old_inventory",
+    ];
+
+    // Query existing tables
+    const result = await db.execute(sql`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_type = 'BASE TABLE'
+    `);
+
+    const existingTables = result.rows.map((r: any) => r.table_name);
+    console.log("[db] Existing tables:", existingTables);
+
+    // Find which old tables exist
+    const tablesToDrop = oldTables.filter((t) => existingTables.includes(t));
+
+    if (tablesToDrop.length > 0) {
+      console.log("[db] Found old tables to drop:", tablesToDrop);
+
+      // Drop each old table
+      for (const table of tablesToDrop) {
+        try {
+          console.log(`[db] Dropping old table: ${table}`);
+          await db.execute(sql`DROP TABLE IF EXISTS ${sql.identifier(table)} CASCADE`);
+          console.log(`[db] ✅ Dropped ${table}`);
+        } catch (err) {
+          console.error(`[db] Failed to drop ${table}:`, err);
+        }
+      }
+    } else {
+      console.log("[db] No old tables found - clean slate");
+    }
+
+    // Clear migration history to force fresh migrations
+    console.log("[db] Clearing migration history...");
+    await db.execute(sql`DELETE FROM __drizzle_migrations__`);
+    console.log("[db] ✅ Migration history cleared");
+
+  } catch (error) {
+    console.error("[db] ⚠️  Cleanup warning (non-fatal):", error);
+    // Don't throw - this is best-effort
+  }
+}
+
+/**
  * Run pending migrations from the drizzle migrations folder.
  * This is a safety net for auto-migration on startup.
  * In production, Railway should run migrations via Procfile release task.
@@ -30,15 +91,15 @@ export async function runMigrations() {
     console.log("[db] >>> MIGRATION CHECK STARTING <<<");
     console.log("[db] NODE_ENV:", process.env.NODE_ENV);
     
-    // Use process.cwd() for migrations folder - works in both dev (tsx) and bundled (CommonJS)
-    // In production: migrations are in dist/drizzle (copied during build)
-    // In development: migrations are in drizzle folder
+    // STEP 1: Clean up old corrupted tables first
+    await cleanupOldTables();
+
+    // STEP 2: Run migrations from the drizzle folder
     const migrationsFolder = join(process.cwd(), "drizzle");
 
     console.log("[db] Using migrations path:", migrationsFolder);
     console.log("[db] Does path exist?", fs.existsSync(migrationsFolder));
 
-    // Run migrations from the drizzle folder
     console.log("[db] Checking for pending migrations...");
     await migrate(db, {
       migrationsFolder,
