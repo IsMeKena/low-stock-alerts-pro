@@ -231,9 +231,20 @@ async function runMigrations() {
     console.log("[db] >>> MIGRATION CHECK STARTING <<<");
     console.log("[db] NODE_ENV:", process.env.NODE_ENV);
     await cleanupOldTables();
-    const migrationsFolder = (0, import_path.join)(process.cwd(), "drizzle");
+    let migrationsFolder = (0, import_path.join)(process.cwd(), "drizzle");
+    if (!import_fs.default.existsSync(migrationsFolder)) {
+      const bundledMigrationsFolder = (0, import_path.join)(process.cwd(), "dist", "drizzle");
+      if (import_fs.default.existsSync(bundledMigrationsFolder)) {
+        migrationsFolder = bundledMigrationsFolder;
+        console.log("[db] Source migrations not found, using bundled location");
+      }
+    }
     console.log("[db] Using migrations path:", migrationsFolder);
     console.log("[db] Does path exist?", import_fs.default.existsSync(migrationsFolder));
+    if (import_fs.default.existsSync(migrationsFolder)) {
+      const files = import_fs.default.readdirSync(migrationsFolder);
+      console.log("[db] Migration files found:", files);
+    }
     console.log("[db] Checking for pending migrations...");
     await (0, import_migrator.migrate)(db, {
       migrationsFolder

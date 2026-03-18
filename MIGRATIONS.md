@@ -82,6 +82,38 @@ npm run test:migrations:all
 
 ## Production Deployment
 
+### Migration Path Resolution (Critical Fix)
+
+**Problem:** Migrations copied to `dist/drizzle` during build, but app looks for `./drizzle` at startup.
+
+**Solution:** Smart path resolution in `runMigrations()`:
+```typescript
+// Try source path first (development scenario)
+let migrationsFolder = join(process.cwd(), "drizzle");
+
+// Fall back to bundled path (production on Railway)
+if (!fs.existsSync(migrationsFolder)) {
+  const bundledMigrationsFolder = join(process.cwd(), "dist", "drizzle");
+  if (fs.existsSync(bundledMigrationsFolder)) {
+    migrationsFolder = bundledMigrationsFolder;
+  }
+}
+
+// Execute migrations from whichever location has them
+await migrate(db, { migrationsFolder });
+```
+
+**Why this matters:**
+- On Railway, the build creates `dist/drizzle/` with all migration files
+- When `node dist/index.cjs` starts, `process.cwd()` is `/app`, not `/app/dist`
+- Code needs to look in the right place: `/app/dist/drizzle` (bundled) if source `/app/drizzle` doesn't exist
+
+**Deployment flow:**
+1. Railway: `npm install` → installs dependencies
+2. Railway: `npm run build` → bundles server, copies migrations to `dist/drizzle`
+3. Railway: `npm run db:push` → uses drizzle-kit (if source folder still exists)
+4. Railway: `node dist/index.cjs` → runs web process, calls `runMigrations()` with proper path resolution
+
 ### Before (❌ NOT SAFE)
 ```typescript
 // server/db.ts

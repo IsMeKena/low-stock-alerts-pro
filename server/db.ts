@@ -95,10 +95,27 @@ export async function runMigrations() {
     await cleanupOldTables();
 
     // STEP 2: Run migrations from the drizzle folder
-    const migrationsFolder = join(process.cwd(), "drizzle");
+    // In production, the bundled code runs from dist/index.cjs, so migrations are in dist/drizzle
+    // In development, migrations are in ./drizzle (source folder)
+    let migrationsFolder = join(process.cwd(), "drizzle");
+    
+    // If migrations don't exist at the source location, try the bundled location
+    if (!fs.existsSync(migrationsFolder)) {
+      const bundledMigrationsFolder = join(process.cwd(), "dist", "drizzle");
+      if (fs.existsSync(bundledMigrationsFolder)) {
+        migrationsFolder = bundledMigrationsFolder;
+        console.log("[db] Source migrations not found, using bundled location");
+      }
+    }
 
     console.log("[db] Using migrations path:", migrationsFolder);
     console.log("[db] Does path exist?", fs.existsSync(migrationsFolder));
+    
+    // List migration files
+    if (fs.existsSync(migrationsFolder)) {
+      const files = fs.readdirSync(migrationsFolder);
+      console.log("[db] Migration files found:", files);
+    }
 
     console.log("[db] Checking for pending migrations...");
     await migrate(db, {
