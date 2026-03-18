@@ -185,88 +185,140 @@ __export(db_exports, {
   db: () => db,
   runMigrations: () => runMigrations
 });
-async function cleanupOldTables() {
+async function ensureTables() {
+  console.log("[db] Ensuring tables exist...");
   try {
-    console.log("[db] >>> CLEANUP: Checking for old corrupted tables <<<");
-    const oldTables = [
-      "alert_logs",
-      "inventory_levels",
-      "inventory_level",
-      "alerts_log",
-      "old_alerts",
-      "old_inventory"
-    ];
-    const result = await db.execute(import_drizzle_orm2.sql`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-      AND table_type = 'BASE TABLE'
-    `);
-    const existingTables = result.rows.map((r) => r.table_name);
-    console.log("[db] Existing tables:", existingTables);
-    const tablesToDrop = oldTables.filter((t) => existingTables.includes(t));
-    if (tablesToDrop.length > 0) {
-      console.log("[db] Found old tables to drop:", tablesToDrop);
-      for (const table of tablesToDrop) {
-        try {
-          console.log(`[db] Dropping old table: ${table}`);
-          await db.execute(import_drizzle_orm2.sql`DROP TABLE IF EXISTS ${import_drizzle_orm2.sql.identifier(table)} CASCADE`);
-          console.log(`[db] \u2705 Dropped ${table}`);
-        } catch (err) {
-          console.error(`[db] Failed to drop ${table}:`, err);
-        }
-      }
-    } else {
-      console.log("[db] No old tables found - clean slate");
-    }
-    console.log("[db] Clearing migration history...");
-    await db.execute(import_drizzle_orm2.sql`DELETE FROM __drizzle_migrations__`);
-    console.log("[db] \u2705 Migration history cleared");
+    const createTablesSQL = `
+      CREATE TABLE IF NOT EXISTS shopify_sessions (
+        id varchar(255) PRIMARY KEY NOT NULL,
+        shop varchar(255) NOT NULL,
+        state varchar(255),
+        is_online boolean DEFAULT false,
+        scope text,
+        expires timestamp,
+        access_token text,
+        online_access_info text,
+        CONSTRAINT check_session_validity CHECK (access_token IS NOT NULL OR state IS NOT NULL)
+      );
+
+      CREATE TABLE IF NOT EXISTS products (
+        id varchar(255) PRIMARY KEY NOT NULL,
+        shop_domain varchar(255) NOT NULL,
+        shopify_product_id varchar(255) NOT NULL,
+        title text NOT NULL,
+        handle text,
+        image_url text,
+        threshold_type varchar(20) DEFAULT 'quantity',
+        threshold_value integer DEFAULT 5,
+        safety_stock integer DEFAULT 10,
+        location_id varchar(255),
+        created_at timestamp DEFAULT now() NOT NULL,
+        updated_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS inventory (
+        id varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        shop_domain varchar(255) NOT NULL,
+        product_id varchar(255) NOT NULL,
+        location_id varchar(255) NOT NULL,
+        sku text,
+        quantity integer DEFAULT 0 NOT NULL,
+        threshold integer DEFAULT 5,
+        last_updated timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS alerts (
+        id varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        shop_domain varchar(255) NOT NULL,
+        product_id varchar(255) NOT NULL,
+        location_id varchar(255),
+        quantity integer NOT NULL,
+        threshold integer NOT NULL,
+        status varchar(20) DEFAULT 'active',
+        created_at timestamp DEFAULT now() NOT NULL,
+        resolved_at timestamp
+      );
+
+      CREATE TABLE IF NOT EXISTS batching_queue (
+        id varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        shop_domain varchar(255) NOT NULL,
+        alert_id varchar(255) NOT NULL,
+        product_id varchar(255) NOT NULL,
+        location_id varchar(255),
+        quantity integer NOT NULL,
+        threshold integer NOT NULL,
+        alert_type varchar(20) NOT NULL,
+        status varchar(20) DEFAULT 'pending',
+        scheduled_for timestamp NOT NULL,
+        sent_at timestamp,
+        created_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS billing_plan (
+        id varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        shop_domain varchar(255) NOT NULL,
+        plan varchar(20) DEFAULT 'free' NOT NULL,
+        created_at timestamp DEFAULT now() NOT NULL,
+        updated_at timestamp DEFAULT now() NOT NULL,
+        CONSTRAINT billing_plan_shop_domain_unique UNIQUE(shop_domain)
+      );
+
+      CREATE TABLE IF NOT EXISTS usage_tracker (
+        id varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        shop_domain varchar(255) NOT NULL,
+        plan varchar(20) NOT NULL,
+        email_count integer DEFAULT 0 NOT NULL,
+        whatsapp_count integer DEFAULT 0 NOT NULL,
+        month varchar(7) NOT NULL,
+        usage_remaining integer DEFAULT 0 NOT NULL,
+        created_at timestamp DEFAULT now() NOT NULL,
+        updated_at timestamp DEFAULT now() NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS shop_settings (
+        id varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+        shop_domain varchar(255) NOT NULL,
+        notification_method varchar(20) DEFAULT 'email',
+        notification_email varchar(255),
+        whatsapp_number varchar(20),
+        threshold_type varchar(20) DEFAULT 'quantity',
+        threshold_value integer DEFAULT 5,
+        safety_stock integer DEFAULT 10,
+        batching_enabled boolean DEFAULT false,
+        batching_interval varchar(20) DEFAULT 'daily',
+        email_alerts_enabled boolean DEFAULT true,
+        is_onboarded boolean DEFAULT false,
+        dismissed_upsell_banner boolean DEFAULT false,
+        created_at timestamp DEFAULT now() NOT NULL,
+        updated_at timestamp DEFAULT now() NOT NULL,
+        CONSTRAINT shop_settings_shop_domain_unique UNIQUE(shop_domain)
+      );
+    `;
+    await client.query(createTablesSQL);
+    console.log("[db] \u2705 All tables ready");
+    return true;
   } catch (error) {
-    console.error("[db] \u26A0\uFE0F  Cleanup warning (non-fatal):", error);
+    console.error("[db] \u274C Failed to ensure tables:", error);
+    throw error;
   }
 }
 async function runMigrations() {
   try {
-    console.log("[db] >>> MIGRATION CHECK STARTING <<<");
-    console.log("[db] NODE_ENV:", process.env.NODE_ENV);
-    await cleanupOldTables();
-    let migrationsFolder = (0, import_path.join)(process.cwd(), "drizzle");
-    if (!import_fs.default.existsSync(migrationsFolder)) {
-      const bundledMigrationsFolder = (0, import_path.join)(process.cwd(), "dist", "drizzle");
-      if (import_fs.default.existsSync(bundledMigrationsFolder)) {
-        migrationsFolder = bundledMigrationsFolder;
-        console.log("[db] Source migrations not found, using bundled location");
-      }
-    }
-    console.log("[db] Using migrations path:", migrationsFolder);
-    console.log("[db] Does path exist?", import_fs.default.existsSync(migrationsFolder));
-    if (import_fs.default.existsSync(migrationsFolder)) {
-      const files = import_fs.default.readdirSync(migrationsFolder);
-      console.log("[db] Migration files found:", files);
-    }
-    console.log("[db] Checking for pending migrations...");
-    await (0, import_migrator.migrate)(db, {
-      migrationsFolder
-    });
-    console.log("[db] \u2705 Migrations completed successfully");
+    console.log("[db] Ensuring all tables exist...");
+    await ensureTables();
+    console.log("[db] \u2705 Database initialization complete");
     return true;
   } catch (error) {
-    console.error("[db] \u274C Migration error:", error);
-    console.error("[db] Error details:", JSON.stringify(error, null, 2));
-    return false;
+    console.error("[db] \u274C Database initialization failed:", error);
+    throw error;
   }
 }
-var import_node_postgres, import_pg, import_migrator, import_drizzle_orm2, import_path, import_fs, databaseUrl, pool, db, client;
+var import_node_postgres, import_pg, databaseUrl, pool, db, client;
 var init_db = __esm({
   "server/db.ts"() {
     "use strict";
     import_node_postgres = require("drizzle-orm/node-postgres");
     import_pg = require("pg");
-    import_migrator = require("drizzle-orm/node-postgres/migrator");
-    import_drizzle_orm2 = require("drizzle-orm");
-    import_path = require("path");
-    import_fs = __toESM(require("fs"), 1);
     init_schema();
     databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) {
@@ -283,7 +335,7 @@ var init_db = __esm({
 // server/billing-service.ts
 async function getUserPlan(shopDomain) {
   try {
-    const plan = await db.select().from(billingPlans).where((0, import_drizzle_orm4.eq)(billingPlans.shopDomain, shopDomain)).limit(1);
+    const plan = await db.select().from(billingPlans).where((0, import_drizzle_orm3.eq)(billingPlans.shopDomain, shopDomain)).limit(1);
     return plan.length > 0 ? plan[0].plan : "free";
   } catch (error) {
     console.error("[billing] Error getting user plan:", error);
@@ -292,12 +344,12 @@ async function getUserPlan(shopDomain) {
 }
 async function setPlan(shopDomain, plan) {
   try {
-    const existing = await db.select().from(billingPlans).where((0, import_drizzle_orm4.eq)(billingPlans.shopDomain, shopDomain)).limit(1);
+    const existing = await db.select().from(billingPlans).where((0, import_drizzle_orm3.eq)(billingPlans.shopDomain, shopDomain)).limit(1);
     if (existing.length > 0) {
       await db.update(billingPlans).set({
         plan,
         updatedAt: /* @__PURE__ */ new Date()
-      }).where((0, import_drizzle_orm4.eq)(billingPlans.shopDomain, shopDomain));
+      }).where((0, import_drizzle_orm3.eq)(billingPlans.shopDomain, shopDomain));
     } else {
       await db.insert(billingPlans).values({
         shopDomain,
@@ -324,9 +376,9 @@ async function getOrInitializeUsageTracker(shopDomain) {
   const month = getCurrentMonth();
   const plan = await getUserPlan(shopDomain);
   const existing = await db.select().from(usageTracker).where(
-    (0, import_drizzle_orm4.and)(
-      (0, import_drizzle_orm4.eq)(usageTracker.shopDomain, shopDomain),
-      (0, import_drizzle_orm4.eq)(usageTracker.month, month)
+    (0, import_drizzle_orm3.and)(
+      (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+      (0, import_drizzle_orm3.eq)(usageTracker.month, month)
     )
   ).limit(1);
   if (existing.length > 0) {
@@ -361,9 +413,9 @@ async function trackEmailUsage(shopDomain) {
       usageRemaining: Math.max(tracker.usageRemaining - 1, 0),
       updatedAt: /* @__PURE__ */ new Date()
     }).where(
-      (0, import_drizzle_orm4.and)(
-        (0, import_drizzle_orm4.eq)(usageTracker.shopDomain, shopDomain),
-        (0, import_drizzle_orm4.eq)(usageTracker.month, tracker.month)
+      (0, import_drizzle_orm3.and)(
+        (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+        (0, import_drizzle_orm3.eq)(usageTracker.month, tracker.month)
       )
     );
     console.log(`[billing] Tracked email usage for ${shopDomain}`);
@@ -379,9 +431,9 @@ async function trackWhatsAppUsage(shopDomain) {
       usageRemaining: Math.max(tracker.usageRemaining - 1, 0),
       updatedAt: /* @__PURE__ */ new Date()
     }).where(
-      (0, import_drizzle_orm4.and)(
-        (0, import_drizzle_orm4.eq)(usageTracker.shopDomain, shopDomain),
-        (0, import_drizzle_orm4.eq)(usageTracker.month, tracker.month)
+      (0, import_drizzle_orm3.and)(
+        (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+        (0, import_drizzle_orm3.eq)(usageTracker.month, tracker.month)
       )
     );
     console.log(`[billing] Tracked WhatsApp usage for ${shopDomain}`);
@@ -453,9 +505,9 @@ async function resetUsageForMonth(shopDomain) {
     const tierConfig = PRICING_TIERS[plan];
     const limit = Math.max(tierConfig.emailLimit + tierConfig.whatsappLimit, 10);
     const existing = await db.select().from(usageTracker).where(
-      (0, import_drizzle_orm4.and)(
-        (0, import_drizzle_orm4.eq)(usageTracker.shopDomain, shopDomain),
-        (0, import_drizzle_orm4.eq)(usageTracker.month, month)
+      (0, import_drizzle_orm3.and)(
+        (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+        (0, import_drizzle_orm3.eq)(usageTracker.month, month)
       )
     ).limit(1);
     if (existing.length > 0) {
@@ -466,9 +518,9 @@ async function resetUsageForMonth(shopDomain) {
         usageRemaining: limit,
         updatedAt: /* @__PURE__ */ new Date()
       }).where(
-        (0, import_drizzle_orm4.and)(
-          (0, import_drizzle_orm4.eq)(usageTracker.shopDomain, shopDomain),
-          (0, import_drizzle_orm4.eq)(usageTracker.month, month)
+        (0, import_drizzle_orm3.and)(
+          (0, import_drizzle_orm3.eq)(usageTracker.shopDomain, shopDomain),
+          (0, import_drizzle_orm3.eq)(usageTracker.month, month)
         )
       );
     }
@@ -477,13 +529,13 @@ async function resetUsageForMonth(shopDomain) {
     console.error("[billing] Error resetting usage:", error);
   }
 }
-var import_drizzle_orm4, PRICING_TIERS;
+var import_drizzle_orm3, PRICING_TIERS;
 var init_billing_service = __esm({
   "server/billing-service.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm4 = require("drizzle-orm");
+    import_drizzle_orm3 = require("drizzle-orm");
     PRICING_TIERS = {
       free: { plan: "free", emailLimit: 10, whatsappLimit: 0 },
       pro: { plan: "pro", emailLimit: 500, whatsappLimit: 0 },
@@ -704,7 +756,7 @@ function setupBillingRoutes(router) {
           return res.status(400).json({ error: "Invalid phone number format" });
         }
       }
-      const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop)).limit(1);
+      const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm7.eq)(shopSettings.shopDomain, shop)).limit(1);
       if (existing.length > 0) {
         await db.update(shopSettings).set({
           whatsappNumber: whatsappNumber || existing[0].whatsappNumber,
@@ -712,7 +764,7 @@ function setupBillingRoutes(router) {
           batchingInterval: batchingInterval || existing[0].batchingInterval,
           emailAlertsEnabled: emailAlertsEnabled !== void 0 ? emailAlertsEnabled : existing[0].emailAlertsEnabled,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop));
+        }).where((0, import_drizzle_orm7.eq)(shopSettings.shopDomain, shop));
       } else {
         await db.insert(shopSettings).values({
           shopDomain: shop,
@@ -740,7 +792,7 @@ function setupBillingRoutes(router) {
       if (!shop) {
         return res.status(400).json({ error: "Missing shop parameter" });
       }
-      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop)).limit(1);
+      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm7.eq)(shopSettings.shopDomain, shop)).limit(1);
       if (!settings.length) {
         return res.json({
           whatsappNumber: null,
@@ -764,14 +816,14 @@ function setupBillingRoutes(router) {
     }
   });
 }
-var import_drizzle_orm8;
+var import_drizzle_orm7;
 var init_billing = __esm({
   "server/routes/billing.ts"() {
     "use strict";
     init_billing_service();
     init_db();
     init_schema();
-    import_drizzle_orm8 = require("drizzle-orm");
+    import_drizzle_orm7 = require("drizzle-orm");
   }
 });
 
@@ -833,7 +885,7 @@ function setupOnboardingRoutes(router) {
           }
         }
         await setPlan(shop, planToSet);
-        const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop)).limit(1);
+        const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop)).limit(1);
         const settingsData = {
           notificationMethod,
           notificationEmail: notificationMethod.includes("email") ? notificationEmail : null,
@@ -848,7 +900,7 @@ function setupOnboardingRoutes(router) {
           updatedAt: /* @__PURE__ */ new Date()
         };
         if (existing.length > 0) {
-          await db.update(shopSettings).set(settingsData).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop));
+          await db.update(shopSettings).set(settingsData).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop));
         } else {
           await db.insert(shopSettings).values({
             shopDomain: shop,
@@ -877,7 +929,7 @@ function setupOnboardingRoutes(router) {
       if (!shop) {
         return res.status(400).json({ error: "Missing shop parameter" });
       }
-      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop)).limit(1);
+      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop)).limit(1);
       if (!settings.length) {
         return res.json({
           isOnboarded: false,
@@ -901,12 +953,12 @@ function setupOnboardingRoutes(router) {
         if (!shop) {
           return res.status(400).json({ error: "Missing shop parameter" });
         }
-        const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop)).limit(1);
+        const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop)).limit(1);
         if (existing.length > 0) {
           await db.update(shopSettings).set({
             dismissedUpsellBanner: true,
             updatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop));
+          }).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop));
         } else {
           await db.insert(shopSettings).values({
             shopDomain: shop,
@@ -930,13 +982,13 @@ function setupOnboardingRoutes(router) {
     }
   );
 }
-var import_drizzle_orm9;
+var import_drizzle_orm8;
 var init_onboarding = __esm({
   "server/routes/onboarding.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm9 = require("drizzle-orm");
+    import_drizzle_orm8 = require("drizzle-orm");
     init_billing_service();
   }
 });
@@ -952,7 +1004,7 @@ __export(batching_service_exports, {
 });
 async function addToBatch(shop, alertId, productId, locationId, quantity, threshold, alertType) {
   try {
-    const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm10.eq)(shopSettings.shopDomain, shop)).limit(1);
+    const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop)).limit(1);
     if (!settings.length || !settings[0].batchingEnabled) {
       console.log(
         `[batching] Batching disabled for ${shop}, skipping queue`
@@ -984,9 +1036,9 @@ async function getPendingBatches(shop) {
   try {
     const now = /* @__PURE__ */ new Date();
     let query = db.select().from(batchingQueue).where(
-      (0, import_drizzle_orm10.and)(
-        (0, import_drizzle_orm10.eq)(batchingQueue.status, "pending"),
-        (0, import_drizzle_orm10.lte)(batchingQueue.scheduledFor, now)
+      (0, import_drizzle_orm9.and)(
+        (0, import_drizzle_orm9.eq)(batchingQueue.status, "pending"),
+        (0, import_drizzle_orm9.lte)(batchingQueue.scheduledFor, now)
       )
     );
     const pending = await query;
@@ -1019,10 +1071,10 @@ async function formatWhatsAppBatch(alerts2) {
 async function sendBatch(shop, alertType) {
   try {
     const pending = await db.select().from(batchingQueue).where(
-      (0, import_drizzle_orm10.and)(
-        (0, import_drizzle_orm10.eq)(batchingQueue.shopDomain, shop),
-        (0, import_drizzle_orm10.eq)(batchingQueue.alertType, alertType),
-        (0, import_drizzle_orm10.eq)(batchingQueue.status, "pending")
+      (0, import_drizzle_orm9.and)(
+        (0, import_drizzle_orm9.eq)(batchingQueue.shopDomain, shop),
+        (0, import_drizzle_orm9.eq)(batchingQueue.alertType, alertType),
+        (0, import_drizzle_orm9.eq)(batchingQueue.status, "pending")
       )
     );
     if (!pending.length) {
@@ -1032,13 +1084,13 @@ async function sendBatch(shop, alertType) {
       return;
     }
     if (alertType === "whatsapp") {
-      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm10.eq)(shopSettings.shopDomain, shop)).limit(1);
+      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop)).limit(1);
       if (!settings.length || !settings[0].whatsappNumber) {
         console.warn(
           `[batching] No WhatsApp number configured for ${shop}`
         );
         for (const alert of pending) {
-          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm10.eq)(batchingQueue.id, alert.id));
+          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
         }
         return;
       }
@@ -1054,14 +1106,14 @@ async function sendBatch(shop, alertType) {
           await db.update(batchingQueue).set({
             status: "sent",
             sentAt: now
-          }).where((0, import_drizzle_orm10.eq)(batchingQueue.id, alert.id));
+          }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
         }
         console.log(
           `[batching] Sent ${pending.length} WhatsApp alerts for ${shop}`
         );
       } else {
         for (const alert of pending) {
-          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm10.eq)(batchingQueue.id, alert.id));
+          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
         }
         console.error(`[batching] Failed to send batch for ${shop}`);
       }
@@ -1074,7 +1126,7 @@ async function sendBatch(shop, alertType) {
         await db.update(batchingQueue).set({
           status: "sent",
           sentAt: now
-        }).where((0, import_drizzle_orm10.eq)(batchingQueue.id, alert.id));
+        }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
       }
     }
   } catch (error) {
@@ -1107,13 +1159,13 @@ function startBatchingProcessor(intervalMs = 5 * 60 * 1e3) {
   }, intervalMs);
   return timer;
 }
-var import_drizzle_orm10, BATCH_INTERVALS;
+var import_drizzle_orm9, BATCH_INTERVALS;
 var init_batching_service = __esm({
   "server/batching-service.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm10 = require("drizzle-orm");
+    import_drizzle_orm9 = require("drizzle-orm");
     init_twilio_service();
     BATCH_INTERVALS = {
       hourly: 60 * 60 * 1e3,
@@ -1138,7 +1190,7 @@ var import_shopify_api2 = require("@shopify/shopify-api");
 
 // server/shopify-session-storage.ts
 var import_shopify_api = require("@shopify/shopify-api");
-var import_drizzle_orm3 = require("drizzle-orm");
+var import_drizzle_orm2 = require("drizzle-orm");
 init_db();
 init_schema();
 var PostgresSessionStorage = class {
@@ -1179,7 +1231,7 @@ var PostgresSessionStorage = class {
   }
   async loadSession(id) {
     try {
-      const [row] = await db.select().from(shopifySessions).where((0, import_drizzle_orm3.eq)(shopifySessions.id, id));
+      const [row] = await db.select().from(shopifySessions).where((0, import_drizzle_orm2.eq)(shopifySessions.id, id));
       if (!row) return void 0;
       const session = new import_shopify_api.Session({
         id: row.id,
@@ -1201,7 +1253,7 @@ var PostgresSessionStorage = class {
   }
   async deleteSession(id) {
     try {
-      await db.delete(shopifySessions).where((0, import_drizzle_orm3.eq)(shopifySessions.id, id));
+      await db.delete(shopifySessions).where((0, import_drizzle_orm2.eq)(shopifySessions.id, id));
       return true;
     } catch (error) {
       console.error("Failed to delete session:", error);
@@ -1211,7 +1263,7 @@ var PostgresSessionStorage = class {
   async deleteSessions(ids) {
     try {
       for (const id of ids) {
-        await db.delete(shopifySessions).where((0, import_drizzle_orm3.eq)(shopifySessions.id, id));
+        await db.delete(shopifySessions).where((0, import_drizzle_orm2.eq)(shopifySessions.id, id));
       }
       return true;
     } catch (error) {
@@ -1221,7 +1273,7 @@ var PostgresSessionStorage = class {
   }
   async findSessionsByShop(shop) {
     try {
-      const rows = await db.select().from(shopifySessions).where((0, import_drizzle_orm3.eq)(shopifySessions.shop, shop));
+      const rows = await db.select().from(shopifySessions).where((0, import_drizzle_orm2.eq)(shopifySessions.shop, shop));
       return rows.map((row) => {
         const session = new import_shopify_api.Session({
           id: row.id,
@@ -1510,17 +1562,17 @@ var import_bull = __toESM(require("bull"), 1);
 // server/webhook-processors.ts
 init_db();
 init_schema();
-var import_drizzle_orm6 = require("drizzle-orm");
+var import_drizzle_orm5 = require("drizzle-orm");
 
 // server/alerts.ts
 init_db();
 init_schema();
-var import_drizzle_orm5 = require("drizzle-orm");
+var import_drizzle_orm4 = require("drizzle-orm");
 init_billing_service();
 init_twilio_service();
 async function calculateEffectiveThreshold(productId, currentQuantity) {
   try {
-    const product = await db.select().from(products).where((0, import_drizzle_orm5.eq)(products.shopifyProductId, productId)).limit(1);
+    const product = await db.select().from(products).where((0, import_drizzle_orm4.eq)(products.shopifyProductId, productId)).limit(1);
     if (!product.length) {
       return currentQuantity;
     }
@@ -1539,10 +1591,10 @@ async function createLowStockAlert(shop, productId, locationId, quantity, thresh
   try {
     const alertId = `${shop}__${productId}__${locationId}__${Date.now()}`;
     const existing = await db.select().from(alerts).where(
-      (0, import_drizzle_orm5.and)(
-        (0, import_drizzle_orm5.eq)(alerts.shopDomain, shop),
-        (0, import_drizzle_orm5.eq)(alerts.productId, productId),
-        (0, import_drizzle_orm5.eq)(alerts.status, "active")
+      (0, import_drizzle_orm4.and)(
+        (0, import_drizzle_orm4.eq)(alerts.shopDomain, shop),
+        (0, import_drizzle_orm4.eq)(alerts.productId, productId),
+        (0, import_drizzle_orm4.eq)(alerts.status, "active")
       )
     ).limit(1);
     if (existing.length > 0) {
@@ -1574,7 +1626,7 @@ async function resolveAlert(alertId) {
     await db.update(alerts).set({
       status: "resolved",
       resolvedAt: /* @__PURE__ */ new Date()
-    }).where((0, import_drizzle_orm5.eq)(alerts.id, alertId));
+    }).where((0, import_drizzle_orm4.eq)(alerts.id, alertId));
     console.log(`[alerts] Resolved alert ${alertId}`);
   } catch (error) {
     console.error("[alerts] Error resolving alert:", error);
@@ -1584,11 +1636,11 @@ async function resolveAlert(alertId) {
 async function getActiveAlerts(shop) {
   try {
     const shopAlerts = await db.select().from(alerts).where(
-      (0, import_drizzle_orm5.and)((0, import_drizzle_orm5.eq)(alerts.shopDomain, shop), (0, import_drizzle_orm5.eq)(alerts.status, "active"))
+      (0, import_drizzle_orm4.and)((0, import_drizzle_orm4.eq)(alerts.shopDomain, shop), (0, import_drizzle_orm4.eq)(alerts.status, "active"))
     );
     const enriched = await Promise.all(
       shopAlerts.map(async (alert) => {
-        const product = await db.select().from(products).where((0, import_drizzle_orm5.eq)(products.shopifyProductId, alert.productId)).limit(1);
+        const product = await db.select().from(products).where((0, import_drizzle_orm4.eq)(products.shopifyProductId, alert.productId)).limit(1);
         return {
           ...alert,
           product: product[0] || null
@@ -1625,7 +1677,7 @@ async function sendWhatsAppAlert(shop, productName, quantity, threshold, locatio
       console.warn(`[alerts] WhatsApp limit reached for ${shop}`);
       return false;
     }
-    const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm5.eq)(shopSettings.shopDomain, shop)).limit(1);
+    const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm4.eq)(shopSettings.shopDomain, shop)).limit(1);
     if (!settings.length || !settings[0].whatsappNumber) {
       console.warn(`[alerts] No WhatsApp number configured for ${shop}`);
       return false;
@@ -1658,8 +1710,8 @@ async function checkInventoryAlert(shop, productId, locationId, quantity, _legac
         quantity,
         threshold
       );
-      const product = await db.select().from(products).where((0, import_drizzle_orm5.eq)(products.shopifyProductId, productId)).limit(1);
-      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm5.eq)(shopSettings.shopDomain, shop)).limit(1);
+      const product = await db.select().from(products).where((0, import_drizzle_orm4.eq)(products.shopifyProductId, productId)).limit(1);
+      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm4.eq)(shopSettings.shopDomain, shop)).limit(1);
       const productName = product.length ? product[0].title : "Unknown Product";
       if (settings.length && settings[0].emailAlertsEnabled) {
         await sendEmailAlert(shop, productName, quantity, threshold);
@@ -1670,10 +1722,10 @@ async function checkInventoryAlert(shop, productId, locationId, quantity, _legac
       console.log(`[alerts] Alert created for low inventory: ${alertId}`);
     } else {
       const existing = await db.select().from(alerts).where(
-        (0, import_drizzle_orm5.and)(
-          (0, import_drizzle_orm5.eq)(alerts.shopDomain, shop),
-          (0, import_drizzle_orm5.eq)(alerts.productId, productId),
-          (0, import_drizzle_orm5.eq)(alerts.status, "active")
+        (0, import_drizzle_orm4.and)(
+          (0, import_drizzle_orm4.eq)(alerts.shopDomain, shop),
+          (0, import_drizzle_orm4.eq)(alerts.productId, productId),
+          (0, import_drizzle_orm4.eq)(alerts.status, "active")
         )
       );
       for (const alert of existing) {
@@ -1719,7 +1771,7 @@ async function processProductUpdate(shop, payload) {
       handle,
       imageUrl: image?.src || null,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where((0, import_drizzle_orm6.eq)(products.id, productId));
+    }).where((0, import_drizzle_orm5.eq)(products.id, productId));
     console.log(
       `[webhook] Updated product "${title}" (${id}) for ${shop}`
     );
@@ -1741,16 +1793,16 @@ async function processInventoryUpdate(shop, payload) {
     }
     const inventoryId = `${shop}__${inventoryItemId}__${locationId}`;
     const existing = await db.select().from(inventory).where(
-      (0, import_drizzle_orm6.and)(
-        (0, import_drizzle_orm6.eq)(inventory.shopDomain, shop),
-        (0, import_drizzle_orm6.eq)(inventory.locationId, String(locationId))
+      (0, import_drizzle_orm5.and)(
+        (0, import_drizzle_orm5.eq)(inventory.shopDomain, shop),
+        (0, import_drizzle_orm5.eq)(inventory.locationId, String(locationId))
       )
     ).limit(1);
     if (existing.length > 0) {
       await db.update(inventory).set({
         quantity: quantity || 0,
         lastUpdated: new Date(updatedAt)
-      }).where((0, import_drizzle_orm6.eq)(inventory.id, existing[0].id));
+      }).where((0, import_drizzle_orm5.eq)(inventory.id, existing[0].id));
       console.log(
         `[webhook] Updated inventory: ${inventoryItemId} at location ${locationId} = ${quantity}`
       );
@@ -1884,7 +1936,7 @@ initializeQueue();
 // server/shopify-api.ts
 init_db();
 init_schema();
-var import_drizzle_orm7 = require("drizzle-orm");
+var import_drizzle_orm6 = require("drizzle-orm");
 async function fetchShopifyProducts(shop, accessToken) {
   try {
     const client2 = new shopify.clients.Rest({
@@ -1944,14 +1996,14 @@ async function syncProducts(shop, accessToken) {
       const title = product.title;
       const handle = product.handle;
       const imageUrl = product.image?.src || null;
-      const existing = await db.select().from(products).where((0, import_drizzle_orm7.eq)(products.id, productId)).limit(1);
+      const existing = await db.select().from(products).where((0, import_drizzle_orm6.eq)(products.id, productId)).limit(1);
       if (existing.length > 0) {
         await db.update(products).set({
           title,
           handle,
           imageUrl,
           updatedAt: /* @__PURE__ */ new Date()
-        }).where((0, import_drizzle_orm7.eq)(products.id, productId));
+        }).where((0, import_drizzle_orm6.eq)(products.id, productId));
         updated++;
       } else {
         await db.insert(products).values({
@@ -2017,12 +2069,12 @@ async function syncInventoryForItem(shop, accessToken, inventoryItemId, productI
         const locationId = level.location_id;
         const quantity = level.available || 0;
         const inventoryId = `${shop}__${inventoryItemId}__${locationId}`;
-        const existing = await db.select().from(inventory).where((0, import_drizzle_orm7.eq)(inventory.id, inventoryId)).limit(1);
+        const existing = await db.select().from(inventory).where((0, import_drizzle_orm6.eq)(inventory.id, inventoryId)).limit(1);
         if (existing.length > 0) {
           await db.update(inventory).set({
             quantity,
             lastUpdated: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm7.eq)(inventory.id, inventoryId));
+          }).where((0, import_drizzle_orm6.eq)(inventory.id, inventoryId));
         } else {
           await db.insert(inventory).values({
             id: inventoryId,
@@ -2385,7 +2437,7 @@ async function registerRoutes(httpServer2, app2) {
 
 // server/index.ts
 var import_http = require("http");
-var import_path2 = require("path");
+var import_path = require("path");
 init_db();
 var app = (0, import_express.default)();
 var httpServer = (0, import_http.createServer)(app);
@@ -2471,11 +2523,11 @@ async function startServer() {
     return res.status(status).json({ message });
   });
   if (process.env.NODE_ENV === "production") {
-    const staticPath = (0, import_path2.join)(process.cwd(), "dist/public");
+    const staticPath = (0, import_path.join)(process.cwd(), "dist/public");
     app.use(import_express.default.static(staticPath));
     app.use((req, res, next) => {
       if (!req.path.startsWith("/api") && !res.headersSent) {
-        const indexPath = (0, import_path2.join)(staticPath, "index.html");
+        const indexPath = (0, import_path.join)(staticPath, "index.html");
         res.sendFile(indexPath, (err) => {
           if (err) next(err);
         });
