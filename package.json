@@ -7,6 +7,7 @@
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
     "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate:pg",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc"
   },

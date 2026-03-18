@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes";
 import { createServer } from "http";
 import { join } from "path";
 import { closeWebhookQueue } from "./webhook-queue";
+import { runMigrations } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
@@ -60,7 +61,11 @@ app.use((req, res, next) => {
   next();
 });
 
-(async () => {
+async function startServer() {
+  // Run migrations before starting the server
+  console.log("[startup] Running database migrations...");
+  await runMigrations();
+
   // Initialize Twilio (Phase 3)
   try {
     const { initTwilio } = await import("./twilio-service");
@@ -172,4 +177,10 @@ app.use((req, res, next) => {
       process.exit(0);
     });
   });
-})();
+}
+
+// Start the server
+startServer().catch((error) => {
+  console.error("[startup] Fatal error:", error);
+  process.exit(1);
+});
