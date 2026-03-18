@@ -5,7 +5,6 @@ import { createServer } from "http";
 import { join } from "path";
 import { closeWebhookQueue } from "./webhook-queue";
 import { runMigrations } from "./db";
-import { ensureTablesExist } from "./db-init";
 
 const app = express();
 const httpServer = createServer(app);
@@ -65,25 +64,14 @@ app.use((req, res, next) => {
 async function startServer() {
   // Database initialization
   console.log("[startup] === SERVER STARTUP ===");
-  console.log("[startup] Initializing database...");
+  console.log("[startup] Running database migrations...");
   
-  // FIRST: Ensure tables exist (emergency fallback)
-  try {
-    await ensureTablesExist();
-    console.log("[startup] ✅ Database tables verified");
-  } catch (error) {
-    console.error("[startup] ❌ Failed to ensure tables exist:", error);
-    throw error;
-  }
-  
-  // THEN: Try to run migrations (optional if tables already exist)
-  console.log("[startup] Attempting database migrations...");
   try {
     await runMigrations();
     console.log("[startup] ✅ Migrations completed");
-  } catch (migrationError) {
-    console.warn("[startup] ⚠️  Migrations skipped (tables already exist or migrations folder not found)");
-    // Don't throw - if tables exist from ensureTablesExist(), we're fine
+  } catch (error) {
+    console.error("[startup] Fatal error:", error);
+    process.exit(1);
   }
   
   console.log("[startup] Starting Express...");
@@ -155,7 +143,7 @@ async function startServer() {
   }
 
   // Start server
-  const port = parseInt(process.env.PORT || "5000", 10);
+  const port = parseInt(process.env.PORT || "8080", 10);
   httpServer.listen(
     {
       port,

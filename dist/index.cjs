@@ -899,7 +899,7 @@ __export(batching_service_exports, {
 });
 async function addToBatch(shop, alertId, productId, locationId, quantity, threshold, alertType) {
   try {
-    const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop)).limit(1);
+    const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm10.eq)(shopSettings.shopDomain, shop)).limit(1);
     if (!settings.length || !settings[0].batchingEnabled) {
       console.log(
         `[batching] Batching disabled for ${shop}, skipping queue`
@@ -931,9 +931,9 @@ async function getPendingBatches(shop) {
   try {
     const now = /* @__PURE__ */ new Date();
     let query = db.select().from(batchingQueue).where(
-      (0, import_drizzle_orm9.and)(
-        (0, import_drizzle_orm9.eq)(batchingQueue.status, "pending"),
-        (0, import_drizzle_orm9.lte)(batchingQueue.scheduledFor, now)
+      (0, import_drizzle_orm10.and)(
+        (0, import_drizzle_orm10.eq)(batchingQueue.status, "pending"),
+        (0, import_drizzle_orm10.lte)(batchingQueue.scheduledFor, now)
       )
     );
     const pending = await query;
@@ -966,10 +966,10 @@ async function formatWhatsAppBatch(alerts2) {
 async function sendBatch(shop, alertType) {
   try {
     const pending = await db.select().from(batchingQueue).where(
-      (0, import_drizzle_orm9.and)(
-        (0, import_drizzle_orm9.eq)(batchingQueue.shopDomain, shop),
-        (0, import_drizzle_orm9.eq)(batchingQueue.alertType, alertType),
-        (0, import_drizzle_orm9.eq)(batchingQueue.status, "pending")
+      (0, import_drizzle_orm10.and)(
+        (0, import_drizzle_orm10.eq)(batchingQueue.shopDomain, shop),
+        (0, import_drizzle_orm10.eq)(batchingQueue.alertType, alertType),
+        (0, import_drizzle_orm10.eq)(batchingQueue.status, "pending")
       )
     );
     if (!pending.length) {
@@ -979,13 +979,13 @@ async function sendBatch(shop, alertType) {
       return;
     }
     if (alertType === "whatsapp") {
-      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm9.eq)(shopSettings.shopDomain, shop)).limit(1);
+      const settings = await db.select().from(shopSettings).where((0, import_drizzle_orm10.eq)(shopSettings.shopDomain, shop)).limit(1);
       if (!settings.length || !settings[0].whatsappNumber) {
         console.warn(
           `[batching] No WhatsApp number configured for ${shop}`
         );
         for (const alert of pending) {
-          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
+          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm10.eq)(batchingQueue.id, alert.id));
         }
         return;
       }
@@ -1001,14 +1001,14 @@ async function sendBatch(shop, alertType) {
           await db.update(batchingQueue).set({
             status: "sent",
             sentAt: now
-          }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
+          }).where((0, import_drizzle_orm10.eq)(batchingQueue.id, alert.id));
         }
         console.log(
           `[batching] Sent ${pending.length} WhatsApp alerts for ${shop}`
         );
       } else {
         for (const alert of pending) {
-          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
+          await db.update(batchingQueue).set({ status: "failed" }).where((0, import_drizzle_orm10.eq)(batchingQueue.id, alert.id));
         }
         console.error(`[batching] Failed to send batch for ${shop}`);
       }
@@ -1021,7 +1021,7 @@ async function sendBatch(shop, alertType) {
         await db.update(batchingQueue).set({
           status: "sent",
           sentAt: now
-        }).where((0, import_drizzle_orm9.eq)(batchingQueue.id, alert.id));
+        }).where((0, import_drizzle_orm10.eq)(batchingQueue.id, alert.id));
       }
     }
   } catch (error) {
@@ -1054,13 +1054,13 @@ function startBatchingProcessor(intervalMs = 5 * 60 * 1e3) {
   }, intervalMs);
   return timer;
 }
-var import_drizzle_orm9, BATCH_INTERVALS;
+var import_drizzle_orm10, BATCH_INTERVALS;
 var init_batching_service = __esm({
   "server/batching-service.ts"() {
     "use strict";
     init_db();
     init_schema();
-    import_drizzle_orm9 = require("drizzle-orm");
+    import_drizzle_orm10 = require("drizzle-orm");
     init_twilio_service();
     BATCH_INTERVALS = {
       hourly: 60 * 60 * 1e3,
@@ -2288,6 +2288,170 @@ async function registerRoutes(httpServer2, app2) {
 var import_http = require("http");
 var import_path2 = require("path");
 init_db();
+
+// server/db-init.ts
+init_db();
+var import_drizzle_orm9 = require("drizzle-orm");
+async function ensureTablesExist() {
+  try {
+    console.log("[db-init] Checking if tables exist...");
+    await db.execute(import_drizzle_orm9.sql`SELECT 1 FROM shop_settings LIMIT 1`);
+    console.log("[db-init] \u2705 All tables exist, skipping creation");
+    return true;
+  } catch (error) {
+    if (error.code === "42P01" || error.message?.includes("does not exist")) {
+      console.log("[db-init] \u26A0\uFE0F  Tables missing, creating from Drizzle schema...");
+      try {
+        await createAllTables();
+        console.log("[db-init] \u2705 All tables created successfully");
+        return true;
+      } catch (createError) {
+        console.error("[db-init] \u274C Failed to create tables:", createError);
+        throw createError;
+      }
+    } else {
+      console.error("[db-init] Database connection error:", error);
+      throw error;
+    }
+  }
+}
+async function createAllTables() {
+  const tableDefinitions = [
+    // shopify_sessions table - matches Drizzle schema exactly
+    import_drizzle_orm9.sql`
+      CREATE TABLE IF NOT EXISTS shopify_sessions (
+        id VARCHAR(255) PRIMARY KEY,
+        shop VARCHAR(255) NOT NULL UNIQUE,
+        state VARCHAR(255),
+        is_online BOOLEAN NOT NULL DEFAULT false,
+        scope TEXT,
+        expires TIMESTAMP,
+        access_token TEXT,
+        online_access_info TEXT
+      )
+    `,
+    // products table - matches Drizzle schema exactly
+    import_drizzle_orm9.sql`
+      CREATE TABLE IF NOT EXISTS products (
+        id VARCHAR(255) PRIMARY KEY,
+        shop_domain VARCHAR(255) NOT NULL,
+        shopify_product_id VARCHAR(255) NOT NULL,
+        title TEXT NOT NULL,
+        handle TEXT,
+        image_url TEXT,
+        threshold_type VARCHAR(20) DEFAULT 'quantity',
+        threshold_value INTEGER DEFAULT 5,
+        safety_stock INTEGER DEFAULT 10,
+        location_id VARCHAR(255),
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(shop_domain, shopify_product_id)
+      )
+    `,
+    // inventory table - matches Drizzle schema exactly
+    import_drizzle_orm9.sql`
+      CREATE TABLE IF NOT EXISTS inventory (
+        id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+        shop_domain VARCHAR(255) NOT NULL,
+        product_id VARCHAR(255) NOT NULL,
+        location_id VARCHAR(255) NOT NULL,
+        sku TEXT,
+        quantity INTEGER NOT NULL DEFAULT 0,
+        threshold INTEGER DEFAULT 5,
+        last_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `,
+    // alerts table - matches Drizzle schema exactly
+    import_drizzle_orm9.sql`
+      CREATE TABLE IF NOT EXISTS alerts (
+        id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+        shop_domain VARCHAR(255) NOT NULL,
+        product_id VARCHAR(255) NOT NULL,
+        location_id VARCHAR(255),
+        quantity INTEGER NOT NULL,
+        threshold INTEGER NOT NULL,
+        status VARCHAR(20) DEFAULT 'active',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        resolved_at TIMESTAMP
+      )
+    `,
+    // shop_settings table - matches Drizzle schema exactly
+    import_drizzle_orm9.sql`
+      CREATE TABLE IF NOT EXISTS shop_settings (
+        id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+        shop_domain VARCHAR(255) NOT NULL UNIQUE,
+        notification_method VARCHAR(20) DEFAULT 'email',
+        notification_email VARCHAR(255),
+        whatsapp_number VARCHAR(20),
+        threshold_type VARCHAR(20) DEFAULT 'quantity',
+        threshold_value INTEGER DEFAULT 5,
+        safety_stock INTEGER DEFAULT 10,
+        batching_enabled BOOLEAN DEFAULT false,
+        batching_interval VARCHAR(20) DEFAULT 'daily',
+        email_alerts_enabled BOOLEAN DEFAULT true,
+        is_onboarded BOOLEAN DEFAULT false,
+        dismissed_upsell_banner BOOLEAN DEFAULT false,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `,
+    // billing_plan table - matches Drizzle schema exactly
+    import_drizzle_orm9.sql`
+      CREATE TABLE IF NOT EXISTS billing_plan (
+        id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+        shop_domain VARCHAR(255) NOT NULL UNIQUE,
+        plan VARCHAR(20) NOT NULL DEFAULT 'free',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `,
+    // usage_tracker table - matches Drizzle schema exactly
+    import_drizzle_orm9.sql`
+      CREATE TABLE IF NOT EXISTS usage_tracker (
+        id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+        shop_domain VARCHAR(255) NOT NULL,
+        plan VARCHAR(20) NOT NULL,
+        email_count INTEGER NOT NULL DEFAULT 0,
+        whatsapp_count INTEGER NOT NULL DEFAULT 0,
+        month VARCHAR(7) NOT NULL,
+        usage_remaining INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `,
+    // batching_queue table - matches Drizzle schema exactly
+    import_drizzle_orm9.sql`
+      CREATE TABLE IF NOT EXISTS batching_queue (
+        id VARCHAR(255) PRIMARY KEY DEFAULT gen_random_uuid(),
+        shop_domain VARCHAR(255) NOT NULL,
+        alert_id VARCHAR(255) NOT NULL,
+        product_id VARCHAR(255) NOT NULL,
+        location_id VARCHAR(255),
+        quantity INTEGER NOT NULL,
+        threshold INTEGER NOT NULL,
+        alert_type VARCHAR(20) NOT NULL,
+        status VARCHAR(20) DEFAULT 'pending',
+        scheduled_for TIMESTAMP NOT NULL,
+        sent_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `
+  ];
+  for (const definition of tableDefinitions) {
+    try {
+      await db.execute(definition);
+      console.log("[db-init] \u2705 Table created");
+    } catch (error) {
+      if (error.code === "42P07") {
+        console.log("[db-init] \u2139\uFE0F  Table already exists, skipping");
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
+// server/index.ts
 var app = (0, import_express.default)();
 var httpServer = (0, import_http.createServer)(app);
 app.use(
@@ -2328,9 +2492,22 @@ app.use((req, res, next) => {
 });
 async function startServer() {
   console.log("[startup] === SERVER STARTUP ===");
-  console.log("[startup] Running database migrations...");
-  await runMigrations();
-  console.log("[startup] Migrations complete, starting Express...");
+  console.log("[startup] Initializing database...");
+  try {
+    await ensureTablesExist();
+    console.log("[startup] \u2705 Database tables verified");
+  } catch (error) {
+    console.error("[startup] \u274C Failed to ensure tables exist:", error);
+    throw error;
+  }
+  console.log("[startup] Attempting database migrations...");
+  try {
+    await runMigrations();
+    console.log("[startup] \u2705 Migrations completed");
+  } catch (migrationError) {
+    console.warn("[startup] \u26A0\uFE0F  Migrations skipped (tables already exist or migrations folder not found)");
+  }
+  console.log("[startup] Starting Express...");
   try {
     const { initTwilio: initTwilio2 } = await Promise.resolve().then(() => (init_twilio_service(), twilio_service_exports));
     const twilioConfig = {
