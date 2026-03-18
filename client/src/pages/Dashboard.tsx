@@ -92,41 +92,59 @@ export default function Dashboard({ shop }: DashboardProps) {
 
   if (loading) {
     return (
-      <Box paddingBlockStart="400" paddingBlockEnd="400">
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <Text as="h2" variant="headingLg">
-                Loading...
-              </Text>
-            </Card>
-          </Layout.Section>
-        </Layout>
-      </Box>
+      <div
+        style={{
+          maxWidth: "1200px",
+          margin: "0 auto",
+          padding: "var(--p-space-400) var(--p-space-200)",
+          width: "100%",
+        }}
+      >
+        <Box paddingBlockStart="400" paddingBlockEnd="400">
+          <Layout>
+            <Layout.Section>
+              <Card>
+                <Text as="h2" variant="headingLg">
+                  Loading...
+                </Text>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </Box>
+      </div>
     );
   }
 
   if (error) {
     return (
-      <Box paddingBlockStart="400" paddingBlockEnd="400">
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h2" variant="headingLg" tone="critical">
-                  Error
-                </Text>
-                <Text as="p" variant="bodyMd">
-                  {error}
-                </Text>
-                <Button onClick={() => window.location.reload()}>
-                  Retry
-                </Button>
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
-      </Box>
+      <div
+        style={{
+          maxWidth: "1200px",
+          margin: "0 auto",
+          padding: "var(--p-space-400) var(--p-space-200)",
+          width: "100%",
+        }}
+      >
+        <Box paddingBlockStart="400" paddingBlockEnd="400">
+          <Layout>
+            <Layout.Section>
+              <Card>
+                <BlockStack gap="300">
+                  <Text as="h2" variant="headingLg" tone="critical">
+                    Error
+                  </Text>
+                  <Text as="p" variant="bodyMd">
+                    {error}
+                  </Text>
+                  <Button onClick={() => window.location.reload()}>
+                    Retry
+                  </Button>
+                </BlockStack>
+              </Card>
+            </Layout.Section>
+          </Layout>
+        </Box>
+      </div>
     );
   }
 
@@ -149,8 +167,16 @@ export default function Dashboard({ shop }: DashboardProps) {
   };
 
   return (
-    <Box paddingBlockStart="400" paddingBlockEnd="400">
-      <Layout>
+    <div
+      style={{
+        maxWidth: "1200px",
+        margin: "0 auto",
+        padding: "var(--p-space-400) var(--p-space-200)",
+        width: "100%",
+      }}
+    >
+      <Box paddingBlockStart="400" paddingBlockEnd="400">
+        <Layout>
         {/* Upsell Banner - Phase 2 */}
         {shopSettings && (
           <Layout.Section>
@@ -190,7 +216,13 @@ export default function Dashboard({ shop }: DashboardProps) {
         <Layout.Section>
           <BlockStack gap="300">
             {/* Email and WhatsApp Usage in a row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+                gap: "20px",
+              }}
+            >
               <Card>
                 <BlockStack gap="300">
                   <Text as="h3" variant="headingMd">
@@ -269,6 +301,7 @@ export default function Dashboard({ shop }: DashboardProps) {
           </Card>
         </Layout.Section>
       </Layout>
-    </Box>
-  );
-}
+        </Box>
+      </div>
+    );
+  }
