@@ -5,6 +5,7 @@ import { createServer } from "http";
 import { join } from "path";
 import { closeWebhookQueue } from "./webhook-queue";
 import { runMigrations } from "./db";
+import { ensureTablesExist } from "./db-init";
 
 const app = express();
 const httpServer = createServer(app);
@@ -62,8 +63,20 @@ app.use((req, res, next) => {
 });
 
 async function startServer() {
-  // Run migrations before starting the server
+  // Database initialization
   console.log("[startup] === SERVER STARTUP ===");
+  console.log("[startup] Initializing database...");
+  
+  // FIRST: Ensure tables exist (emergency fallback)
+  try {
+    await ensureTablesExist();
+    console.log("[startup] ✅ Database tables verified");
+  } catch (error) {
+    console.error("[startup] ❌ Failed to ensure tables exist:", error);
+    throw error;
+  }
+  
+  // THEN: Run migrations
   console.log("[startup] Running database migrations...");
   await runMigrations();
   console.log("[startup] Migrations complete, starting Express...");
