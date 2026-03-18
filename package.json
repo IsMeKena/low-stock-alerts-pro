@@ -10,7 +10,11 @@
     "db:generate": "drizzle-kit generate:pg",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "test:oauth": "tsx server/test-oauth.ts"
+    "test:oauth": "tsx server/test-oauth.ts",
+    "test:migrations:fresh": "tsx scripts/test-migrations-fresh.ts",
+    "test:migrations:idempotent": "tsx scripts/test-migrations-idempotent.ts",
+    "test:migrations:data-safety": "tsx scripts/test-migrations-data-safety.ts",
+    "test:migrations:all": "npm run test:migrations:fresh && npm run test:migrations:idempotent && npm run test:migrations:data-safety"
   },
   "dependencies": {
     "@shopify/app-bridge": "^3.7.11",

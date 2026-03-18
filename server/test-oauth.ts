@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { db, runMigrations, cleanupCorruptedTables } from "./db";
+import { db, runMigrations } from "./db";
 import { shopifySessions } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { Session } from "@shopify/shopify-api";
@@ -16,20 +16,13 @@ async function testOAuthFlow() {
 
   try {
     // ============================================
-    // Test 0: Database initialization
+    // Test 0: Database initialization (idempotent migrations)
     // ============================================
     console.log("[test] Test 0: Database initialization...");
-    try {
-      await cleanupCorruptedTables();
-      console.log("[test] ✅ Cleanup completed");
-    } catch (error: any) {
-      console.log("[test] ⚠️  Cleanup skipped (fresh database):", error.message);
-    }
-
-    console.log("[test] Running migrations...");
+    console.log("[test] Running idempotent migrations...");
     try {
       await runMigrations();
-      console.log("[test] ✅ Migrations completed");
+      console.log("[test] ✅ Migrations completed (data preserved)");
     } catch (error: any) {
       console.error("[test] ❌ Migration failed:", error.message);
       throw error;

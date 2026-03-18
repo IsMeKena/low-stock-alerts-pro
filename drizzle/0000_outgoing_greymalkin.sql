@@ -1,4 +1,4 @@
-CREATE TABLE "alerts" (
+CREATE TABLE IF NOT EXISTS "alerts" (
 	"id" varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"shop_domain" varchar(255) NOT NULL,
 	"product_id" varchar(255) NOT NULL,
@@ -10,7 +10,7 @@ CREATE TABLE "alerts" (
 	"resolved_at" timestamp
 );
 --> statement-breakpoint
-CREATE TABLE "batching_queue" (
+CREATE TABLE IF NOT EXISTS "batching_queue" (
 	"id" varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"shop_domain" varchar(255) NOT NULL,
 	"alert_id" varchar(255) NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE "batching_queue" (
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "billing_plan" (
+CREATE TABLE IF NOT EXISTS "billing_plan" (
 	"id" varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"shop_domain" varchar(255) NOT NULL,
 	"plan" varchar(20) DEFAULT 'free' NOT NULL,
@@ -34,7 +34,7 @@ CREATE TABLE "billing_plan" (
 	CONSTRAINT "billing_plan_shop_domain_unique" UNIQUE("shop_domain")
 );
 --> statement-breakpoint
-CREATE TABLE "inventory" (
+CREATE TABLE IF NOT EXISTS "inventory" (
 	"id" varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"shop_domain" varchar(255) NOT NULL,
 	"product_id" varchar(255) NOT NULL,
@@ -45,7 +45,7 @@ CREATE TABLE "inventory" (
 	"last_updated" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "products" (
+CREATE TABLE IF NOT EXISTS "products" (
 	"id" varchar(255) PRIMARY KEY NOT NULL,
 	"shop_domain" varchar(255) NOT NULL,
 	"shopify_product_id" varchar(255) NOT NULL,
@@ -60,7 +60,7 @@ CREATE TABLE "products" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "shop_settings" (
+CREATE TABLE IF NOT EXISTS "shop_settings" (
 	"id" varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"shop_domain" varchar(255) NOT NULL,
 	"notification_method" varchar(20) DEFAULT 'email',
@@ -79,7 +79,7 @@ CREATE TABLE "shop_settings" (
 	CONSTRAINT "shop_settings_shop_domain_unique" UNIQUE("shop_domain")
 );
 --> statement-breakpoint
-CREATE TABLE "shopify_sessions" (
+CREATE TABLE IF NOT EXISTS "shopify_sessions" (
 	"id" varchar(255) PRIMARY KEY NOT NULL,
 	"shop" varchar(255) NOT NULL,
 	"state" varchar(255),
@@ -90,7 +90,7 @@ CREATE TABLE "shopify_sessions" (
 	"online_access_info" text
 );
 --> statement-breakpoint
-CREATE TABLE "usage_tracker" (
+CREATE TABLE IF NOT EXISTS "usage_tracker" (
 	"id" varchar(255) PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"shop_domain" varchar(255) NOT NULL,
 	"plan" varchar(20) NOT NULL,
