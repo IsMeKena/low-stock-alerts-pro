@@ -20,6 +20,40 @@ export const db = drizzle(pool, { schema });
 export const client = pool;
 
 /**
+ * Clean up corrupted tables from old db-init.ts manual setup.
+ * Must run BEFORE migrations to ensure fresh schema creation.
+ */
+export async function cleanupCorruptedTables() {
+  try {
+    console.log("[startup] Cleaning up old corrupted tables...");
+    
+    const tables = [
+      "batching_queue",
+      "alerts",
+      "usage_tracker",
+      "billing_plan",
+      "shop_settings",
+      "inventory",
+      "products",
+      "shopify_sessions",
+    ];
+
+    // Drop all tables in one statement for atomicity
+    const dropStatement = tables
+      .map((table) => `DROP TABLE IF EXISTS "${table}" CASCADE`)
+      .join("; ");
+
+    await client.query(dropStatement);
+    console.log("[startup] ✅ Old tables dropped successfully");
+    return true;
+  } catch (error) {
+    // If tables don't exist or fresh database, silently continue
+    console.log("[startup] No corrupted tables found (fresh database)");
+    return false;
+  }
+}
+
+/**
  * Run pending migrations from the drizzle migrations folder.
  * This is a safety net for auto-migration on startup.
  * In production, Railway should run migrations via Procfile release task.

@@ -4,7 +4,7 @@ import { registerRoutes } from "./routes";
 import { createServer } from "http";
 import { join } from "path";
 import { closeWebhookQueue } from "./webhook-queue";
-import { runMigrations } from "./db";
+import { runMigrations, cleanupCorruptedTables } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
@@ -64,9 +64,13 @@ app.use((req, res, next) => {
 async function startServer() {
   // Database initialization
   console.log("[startup] === SERVER STARTUP ===");
-  console.log("[startup] Running database migrations...");
   
   try {
+    // FIRST: Clean up corrupted tables from old manual db-init
+    await cleanupCorruptedTables();
+    
+    // THEN: Run migrations to create fresh schema
+    console.log("[startup] Running database migrations...");
     await runMigrations();
     console.log("[startup] ✅ Migrations completed");
   } catch (error) {
