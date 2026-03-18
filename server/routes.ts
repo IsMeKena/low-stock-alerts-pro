@@ -65,6 +65,32 @@ export async function registerRoutes(
 
       const session = callback.session;
 
+      // CRITICAL: Validate session before saving
+      if (!session) {
+        console.error('[auth] ❌ Shopify returned null/undefined session');
+        throw new Error('No session returned from Shopify callback');
+      }
+
+      if (!session.shop) {
+        console.error('[auth] ❌ Session missing shop:', session);
+        throw new Error('Session missing shop domain');
+      }
+
+      if (!session.accessToken) {
+        console.error('[auth] ❌ Session missing accessToken:', {
+          shop: session.shop,
+          scope: session.scope,
+        });
+        throw new Error('Session missing access token');
+      }
+
+      // Log valid session before saving
+      console.log('[auth] ✅ Valid session received:', {
+        shop: session.shop,
+        accessToken: '***' + session.accessToken.slice(-4),
+        scope: session.scope,
+      });
+
       // Use the auth utility to handle the session
       const result = await handleOAuthSession(session);
 

@@ -5,7 +5,22 @@ import { sessionStorage } from "./shopify-session-storage";
  * Handle a new OAuth session after callback
  */
 export async function handleOAuthSession(session: any) {
+  // CRITICAL: Validate before attempting to save
+  if (!session) {
+    throw new Error('Session is null or undefined');
+  }
+
+  if (!session.shop) {
+    throw new Error('Session missing shop domain');
+  }
+
+  if (!session.accessToken) {
+    throw new Error('Session missing access token - OAuth may have failed');
+  }
+
   try {
+    console.log('[auth] Saving session for shop:', session.shop);
+    
     // Store the session in the database
     const stored = await sessionStorage.storeSession(session);
     if (!stored) {
@@ -13,7 +28,7 @@ export async function handleOAuthSession(session: any) {
     }
 
     console.log(
-      `[auth] Successfully stored session for ${session.shop} with access token`
+      `[auth] ✅ Session successfully stored for ${session.shop}`
     );
 
     return {
@@ -23,7 +38,10 @@ export async function handleOAuthSession(session: any) {
       scope: session.scope,
     };
   } catch (error) {
-    console.error("[auth] Error handling OAuth session:", error);
+    console.error("[auth] ❌ Failed to save session:", {
+      shop: session?.shop,
+      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+    });
     throw error;
   }
 }

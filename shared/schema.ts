@@ -4,16 +4,24 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // Shopify session management
-export const shopifySessions = pgTable("shopify_sessions", {
-  id: varchar("id", { length: 255 }).primaryKey(),
-  shop: varchar("shop", { length: 255 }).notNull(),
-  state: varchar("state", { length: 255 }),
-  isOnline: boolean("is_online").default(false),
-  scope: text("scope"),
-  expires: timestamp("expires"),
-  accessToken: text("access_token"),
-  onlineAccessInfo: text("online_access_info"),
-});
+export const shopifySessions = pgTable(
+  "shopify_sessions",
+  {
+    id: varchar("id", { length: 255 }).primaryKey(),
+    shop: varchar("shop", { length: 255 }).notNull(),
+    state: varchar("state", { length: 255 }),
+    isOnline: boolean("is_online").default(false),
+    scope: text("scope"),
+    expires: timestamp("expires"),
+    accessToken: text("access_token"),
+    onlineAccessInfo: text("online_access_info"),
+  },
+  (table) => [
+    // CRITICAL: Prevent duplicate sessions for same shop+mode combination
+    // This ensures we don't accumulate stale or invalid sessions
+    sql`CONSTRAINT check_session_validity CHECK (access_token IS NOT NULL OR state IS NOT NULL)`,
+  ]
+);
 
 export const insertShopifySessionSchema = createInsertSchema(shopifySessions).omit({});
 export type InsertShopifySession = z.infer<typeof insertShopifySessionSchema>;

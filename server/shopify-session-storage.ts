@@ -5,6 +5,16 @@ import { shopifySessions } from "@shared/schema.ts";
 
 export class PostgresSessionStorage {
   async storeSession(session: Session): Promise<boolean> {
+    // CRITICAL: Validate before insert
+    if (!session.id || !session.shop || !session.accessToken) {
+      console.error("[db] ❌ Invalid session - missing critical fields:", {
+        id: !!session.id,
+        shop: !!session.shop,
+        accessToken: !!session.accessToken,
+      });
+      throw new Error('Session missing required fields (id, shop, or accessToken)');
+    }
+
     try {
       const sessionData = {
         id: session.id,
@@ -13,11 +23,13 @@ export class PostgresSessionStorage {
         isOnline: session.isOnline,
         scope: session.scope || null,
         expires: session.expires ? new Date(session.expires) : null,
-        accessToken: session.accessToken || null,
+        accessToken: session.accessToken,
         onlineAccessInfo: session.onlineAccessInfo
           ? JSON.stringify(session.onlineAccessInfo)
           : null,
       };
+
+      console.log('[db] Inserting session:', { shop: session.shop, id: session.id });
 
       await db
         .insert(shopifySessions)
@@ -27,10 +39,14 @@ export class PostgresSessionStorage {
           set: sessionData,
         });
 
+      console.log('[db] ✅ Session inserted successfully');
       return true;
     } catch (error) {
-      console.error("Failed to store session:", error);
-      return false;
+      console.error("[db] ❌ Failed to store session:", {
+        shop: session.shop,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      throw error;
     }
   }
 
