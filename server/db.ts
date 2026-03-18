@@ -1,8 +1,7 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { join } from "path";
 import fs from "fs";
 import * as schema from "@shared/schema.ts";
 
@@ -63,21 +62,10 @@ export async function runMigrations() {
     console.log("[db] >>> MIGRATION CHECK STARTING <<<");
     console.log("[db] NODE_ENV:", process.env.NODE_ENV);
     
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    
-    // Determine migrations folder path based on environment
-    // In production (bundled): dist/drizzle/
-    // In development: drizzle/
-    let migrationsFolder: string;
-    
-    if (process.env.NODE_ENV === "production") {
-      // In production, we're bundled in dist/
-      migrationsFolder = join(__dirname, "../drizzle");
-    } else {
-      // In development, migrations are in the root drizzle folder
-      migrationsFolder = join(__dirname, "../drizzle");
-    }
+    // Use process.cwd() for migrations folder - works in both dev (tsx) and bundled (CommonJS)
+    // In production: migrations are in dist/drizzle (copied during build)
+    // In development: migrations are in drizzle folder
+    const migrationsFolder = join(process.cwd(), "drizzle");
 
     console.log("[db] Using migrations path:", migrationsFolder);
     console.log("[db] Does path exist?", fs.existsSync(migrationsFolder));
