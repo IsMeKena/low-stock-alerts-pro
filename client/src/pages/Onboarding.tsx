@@ -10,6 +10,7 @@ import {
   Box,
   BlockStack,
   InlineStack,
+  ProgressBar,
 } from "@shopify/polaris";
 
 interface OnboardingStep {
@@ -214,7 +215,7 @@ export default function Onboarding() {
     window.location.href = `/dashboard?shop=${shop}`;
   };
 
-  // Calculate visible steps for progress bar
+  // Calculate visible steps for progress indicator
   const visibleSteps = steps.filter(s => {
     if (s.step >= 4 && s.step <= 5) {
       return shouldShowStep(s.step, data.notificationMethod);
@@ -222,78 +223,46 @@ export default function Onboarding() {
     return true;
   });
 
-  const progressPercent = (visibleSteps.findIndex(s => s.step === currentStep) + 1) / visibleSteps.length * 100;
+  const currentStepIndex = visibleSteps.findIndex(s => s.step === currentStep) + 1;
+  const totalVisibleSteps = visibleSteps.length;
+  const progressPercent = (currentStepIndex / totalVisibleSteps) * 100;
 
   return (
-    <Box paddingBlockStart="400" paddingBlockEnd="400">
+    <Box paddingBlockStart="500" paddingBlockEnd="500">
       <Layout>
+        {/* Progress Section - Full Width */}
         <Layout.Section>
-          <Card>
+          <BlockStack gap="400">
+            <ProgressBar progress={progressPercent} />
+            <Text as="p" variant="bodySm" tone="subdued">
+              Step {currentStepIndex} of {totalVisibleSteps}
+            </Text>
+          </BlockStack>
+        </Layout.Section>
+
+        {/* Main Content Section - Full Width, Better Spacing */}
+        <Layout.Section>
+          <Card padding="600">
             <BlockStack gap="500">
-              {/* Progress Bar */}
-              <Box>
-                <div style={{ 
-                  position: "relative", 
-                  height: "8px", 
-                  background: "#e0e0e0", 
-                  borderRadius: "4px", 
-                  overflow: "hidden" 
-                }}>
-                  <div style={{ 
-                    height: "100%", 
-                    width: `${progressPercent}%`, 
-                    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)", 
-                    transition: "width 0.3s" 
-                  }} />
-                </div>
-              </Box>
 
-              {/* Step Indicators */}
-              <InlineStack gap="200" align="center" wrap={true}>
-                {visibleSteps.map((s) => (
-                  <div
-                    key={s.step}
-                    onClick={() => currentStep > s.step && setCurrentStep(s.step)}
-                    style={{
-                      cursor: currentStep > s.step ? "pointer" : "default",
-                      padding: "8px 12px",
-                      borderRadius: "50%",
-                      background:
-                        currentStep === s.step
-                          ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
-                          : currentStep > s.step
-                            ? "#667eea"
-                            : "#e0e0e0",
-                      color: currentStep >= s.step ? "white" : "#999",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: "600",
-                      minWidth: "40px",
-                      minHeight: "40px",
-                    }}
-                  >
-                    {currentStep > s.step ? "✓" : s.step}
-                  </div>
-                ))}
-              </InlineStack>
+              {/* Error Banner */}
+              {error && (
+                <Banner tone="critical">
+                  <Text as="p">{error}</Text>
+                </Banner>
+              )}
 
-              {/* Current Step Content */}
-              <BlockStack gap="300">
-                {error && (
-                  <Banner tone="critical">
-                    <Text as="p">{error}</Text>
-                  </Banner>
-                )}
+              {/* Step Content */}
+              <BlockStack gap="400">
 
                 {/* Step 1: Welcome & Benefits */}
                 {currentStep === 1 && (
-                  <BlockStack gap="400">
-                    <BlockStack gap="100">
-                      <Text as="h2" variant="headingXl">
+                  <BlockStack gap="500">
+                    <BlockStack gap="200">
+                      <Text as="h1" variant="headingXl">
                         🚀 Welcome to Low Stock Alerts
                       </Text>
-                      <Text as="p" variant="bodyMd">
+                      <Text as="p" variant="bodyMd" tone="subdued">
                         Never miss a stockout. Get real-time alerts when your inventory gets low.
                       </Text>
                     </BlockStack>
@@ -316,9 +285,9 @@ export default function Onboarding() {
 
                 {/* Step 2: Alert Threshold */}
                 {currentStep === 2 && (
-                  <BlockStack gap="400">
-                    <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">
+                  <BlockStack gap="500">
+                    <BlockStack gap="200">
+                      <Text as="h1" variant="headingLg">
                         Configure Alert Thresholds
                       </Text>
                       <Text as="p" variant="bodyMd" tone="subdued">
@@ -380,9 +349,9 @@ export default function Onboarding() {
 
                 {/* Step 3: Notification Method */}
                 {currentStep === 3 && (
-                  <BlockStack gap="400">
-                    <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">
+                  <BlockStack gap="500">
+                    <BlockStack gap="200">
+                      <Text as="h1" variant="headingLg">
                         How should we notify you?
                       </Text>
                       <Text as="p" variant="bodyMd" tone="subdued">
@@ -426,9 +395,9 @@ export default function Onboarding() {
 
                 {/* Step 4: Email Address */}
                 {currentStep === 4 && shouldShowStep(4, data.notificationMethod) && (
-                  <BlockStack gap="400">
-                    <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">
+                  <BlockStack gap="500">
+                    <BlockStack gap="200">
+                      <Text as="h1" variant="headingLg">
                         Where should we send email alerts?
                       </Text>
                       <Text as="p" variant="bodyMd" tone="subdued">
@@ -455,9 +424,9 @@ export default function Onboarding() {
 
                 {/* Step 5: WhatsApp Number */}
                 {currentStep === 5 && shouldShowStep(5, data.notificationMethod) && (
-                  <BlockStack gap="400">
-                    <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">
+                  <BlockStack gap="500">
+                    <BlockStack gap="200">
+                      <Text as="h1" variant="headingLg">
                         What's your WhatsApp number?
                       </Text>
                       <Text as="p" variant="bodyMd" tone="subdued">
@@ -484,9 +453,9 @@ export default function Onboarding() {
 
                 {/* Step 6: Review & Complete */}
                 {currentStep === 6 && (
-                  <BlockStack gap="400">
-                    <BlockStack gap="100">
-                      <Text as="h2" variant="headingLg">
+                  <BlockStack gap="500">
+                    <BlockStack gap="200">
+                      <Text as="h1" variant="headingLg">
                         🎉 You're all set!
                       </Text>
                       <Text as="p" variant="bodyMd" tone="subdued">
@@ -542,48 +511,51 @@ export default function Onboarding() {
                 )}
               </BlockStack>
 
-              {/* Navigation Buttons */}
-              <InlineStack gap="200" align="end">
-                {currentStep === 1 ? (
-                  <>
-                    <Button onClick={handleSkip} variant="plain">
-                      Remind me later
-                    </Button>
-                    <Button onClick={handleNext} variant="primary">
-                      Get Started
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button onClick={handlePrev} disabled={currentStep === 1}>
-                      ← Previous
-                    </Button>
-
-                    {currentStep < 6 ? (
-                      <Button
-                        onClick={handleNext}
-                        variant="primary"
-                        disabled={
-                          (currentStep === 4 && data.notificationMethod.includes("email") as any && !isValidEmail(data.notificationEmail)) ||
-                          (currentStep === 5 && data.notificationMethod.includes("whatsapp") as any && !isValidWhatsApp(data.whatsappNumber))
-                        }
-                      >
-                        Next →
-                      </Button>
-                    ) : (
-                      <Button
-                        onClick={handleComplete}
-                        disabled={loading}
-                        variant="primary"
-                      >
-                        {loading ? "Saving..." : "Complete Setup"}
-                      </Button>
-                    )}
-                  </>
-                )}
-              </InlineStack>
             </BlockStack>
           </Card>
+        </Layout.Section>
+
+        {/* Navigation Buttons Section */}
+        <Layout.Section>
+          <InlineStack gap="300" align="space-between" blockAlign="center">
+            {currentStep === 1 ? (
+              <>
+                <Button onClick={handleSkip} variant="plain">
+                  Remind me later
+                </Button>
+                <Button onClick={handleNext} variant="primary">
+                  Get Started
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={handlePrev} disabled={currentStep === 1}>
+                  ← Previous
+                </Button>
+
+                {currentStep < 6 ? (
+                  <Button
+                    onClick={handleNext}
+                    variant="primary"
+                    disabled={
+                      (currentStep === 4 && data.notificationMethod.includes("email") as any && !isValidEmail(data.notificationEmail)) ||
+                      (currentStep === 5 && data.notificationMethod.includes("whatsapp") as any && !isValidWhatsApp(data.whatsappNumber))
+                    }
+                  >
+                    Next →
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleComplete}
+                    disabled={loading}
+                    variant="primary"
+                  >
+                    {loading ? "Saving..." : "Complete Setup"}
+                  </Button>
+                )}
+              </>
+            )}
+          </InlineStack>
         </Layout.Section>
       </Layout>
     </Box>
