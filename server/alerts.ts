@@ -163,7 +163,7 @@ export async function sendEmailAlert(
   productName: string,
   quantity: number,
   threshold: number,
-  locationName?: string
+  _locationName?: string
 ): Promise<boolean> {
   try {
     // Check email limit

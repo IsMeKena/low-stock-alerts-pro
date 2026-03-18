@@ -18,7 +18,9 @@ export function setupOnboardingRoutes(router: Router) {
           plan,
           thresholdType,
           thresholdValue,
+          safetyStock,
           notificationMethod,
+          notificationEmail,
           whatsappNumber,
           batchingEnabled,
           batchingInterval,
@@ -29,7 +31,9 @@ export function setupOnboardingRoutes(router: Router) {
         }
 
         // Validate inputs
-        if (!["free", "pro", "premium"].includes(plan)) {
+        const planToSet = plan || "free"; // Auto-assign Free plan if not provided
+        
+        if (!["free", "pro", "premium"].includes(planToSet)) {
           return res.status(400).json({ error: "Invalid plan" });
         }
 
@@ -45,26 +49,37 @@ export function setupOnboardingRoutes(router: Router) {
           return res.status(400).json({ error: "Invalid batching interval" });
         }
 
-        // Validate WhatsApp number if needed
-        if (
-          notificationMethod === "whatsapp" ||
-          notificationMethod === "both"
-        ) {
-          if (!whatsappNumber) {
+        // Validate email if needed
+        if (notificationMethod === "email" || notificationMethod === "both") {
+          if (!notificationEmail) {
             return res
               .status(400)
-              .json({ error: "WhatsApp number required for selected method" });
+              .json({ error: "Email address required for selected notification method" });
           }
-
-          const phoneRegex = /^\+[1-9]\d{1,14}$/;
-          const cleaned = whatsappNumber.replace(/[\s\-()]/g, "");
-          if (!phoneRegex.test("+" + cleaned.replace(/^\+/, ""))) {
-            return res.status(400).json({ error: "Invalid phone number" });
+          
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(notificationEmail)) {
+            return res.status(400).json({ error: "Invalid email address" });
           }
         }
 
-        // Set billing plan
-        await setPlan(shop, plan);
+        // Validate WhatsApp number if needed
+        if (notificationMethod === "whatsapp" || notificationMethod === "both") {
+          if (!whatsappNumber) {
+            return res
+              .status(400)
+              .json({ error: "WhatsApp number required for selected notification method" });
+          }
+
+          const phoneRegex = /^\+\d{1,3}\d{1,14}$/;
+          const cleaned = whatsappNumber.replace(/[\s\-()]/g, "");
+          if (!phoneRegex.test("+" + cleaned.replace(/^\+/, ""))) {
+            return res.status(400).json({ error: "Invalid phone number format" });
+          }
+        }
+
+        // Set billing plan to Free (auto-assign)
+        await setPlan(shop, planToSet);
 
         // Update or create settings
         const existing = await db
@@ -73,44 +88,42 @@ export function setupOnboardingRoutes(router: Router) {
           .where(eq(shopSettings.shopDomain, shop))
           .limit(1);
 
+        const settingsData = {
+          notificationMethod,
+          notificationEmail: notificationMethod.includes("email") ? notificationEmail : null,
+          whatsappNumber: notificationMethod.includes("whatsapp") ? whatsappNumber : null,
+          thresholdType,
+          thresholdValue,
+          safetyStock: safetyStock || 10,
+          batchingEnabled,
+          batchingInterval,
+          emailAlertsEnabled: notificationMethod !== "whatsapp",
+          isOnboarded: true,
+          updatedAt: new Date(),
+        };
+
         if (existing.length > 0) {
           await db
             .update(shopSettings)
-            .set({
-              whatsappNumber:
-                notificationMethod === "email" ? null : whatsappNumber,
-              batchingEnabled,
-              batchingInterval,
-              emailAlertsEnabled: notificationMethod !== "whatsapp",
-              isOnboarded: true,
-              updatedAt: new Date(),
-            })
+            .set(settingsData)
             .where(eq(shopSettings.shopDomain, shop));
         } else {
           await db.insert(shopSettings).values({
             shopDomain: shop,
-            whatsappNumber:
-              notificationMethod === "email" ? null : whatsappNumber,
-            batchingEnabled,
-            batchingInterval,
-            emailAlertsEnabled: notificationMethod !== "whatsapp",
-            isOnboarded: true,
+            ...settingsData,
             createdAt: new Date(),
-            updatedAt: new Date(),
           });
         }
 
-        // Note: In a real app, you'd also set product-level thresholds here
-        // For now, we store the defaults in settings and apply to products on the client
         console.log(
-          `[onboarding] Completed for ${shop}: plan=${plan}, threshold=${thresholdType}:${thresholdValue}`
+          `[onboarding] Completed for ${shop}: plan=${planToSet}, threshold=${thresholdType}:${thresholdValue}, notifications=${notificationMethod}`
         );
 
         res.json({
           success: true,
           message: "Onboarding completed",
           shop,
-          plan,
+          plan: planToSet,
         });
       } catch (error) {
         console.error("[onboarding] Error completing onboarding:", error);
@@ -152,4 +165,57 @@ export function setupOnboardingRoutes(router: Router) {
       res.status(500).json({ error: "Failed to check onboarding status" });
     }
   });
+
+  /**
+   * POST /api/onboarding/dismiss-banner
+   * Mark upsell banner as dismissed for this shop
+   */
+  router.post(
+    "/api/onboarding/dismiss-banner",
+    async (req: Request, res: Response) => {
+      try {
+        const shop = req.query.shop as string;
+        if (!shop) {
+          return res.status(400).json({ error: "Missing shop parameter" });
+        }
+
+        const existing = await db
+          .select()
+          .from(shopSettings)
+          .where(eq(shopSettings.shopDomain, shop))
+          .limit(1);
+
+        if (existing.length > 0) {
+          await db
+            .update(shopSettings)
+            .set({
+              dismissedUpsellBanner: true,
+              updatedAt: new Date(),
+            })
+            .where(eq(shopSettings.shopDomain, shop));
+        } else {
+          // Create new record with banner dismissed
+          await db.insert(shopSettings).values({
+            shopDomain: shop,
+            dismissedUpsellBanner: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+
+        console.log(
+          `[onboarding] Upsell banner dismissed for ${shop}`
+        );
+
+        res.json({
+          success: true,
+          message: "Banner dismissed",
+          shop,
+        });
+      } catch (error) {
+        console.error("[onboarding] Error dismissing banner:", error);
+        res.status(500).json({ error: "Failed to dismiss banner" });
+      }
+    }
+  );
 }

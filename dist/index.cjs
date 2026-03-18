@@ -126,13 +126,28 @@ var init_schema = __esm({
     shopSettings = (0, import_pg_core.pgTable)("shop_settings", {
       id: (0, import_pg_core.varchar)("id", { length: 255 }).primaryKey().default(import_drizzle_orm.sql`gen_random_uuid()`),
       shopDomain: (0, import_pg_core.varchar)("shop_domain", { length: 255 }).notNull().unique(),
+      // Notification settings
+      notificationMethod: (0, import_pg_core.varchar)("notification_method", { length: 20 }).default("email"),
+      // email, whatsapp, both
+      notificationEmail: (0, import_pg_core.varchar)("notification_email", { length: 255 }),
+      // Custom email for alerts
       whatsappNumber: (0, import_pg_core.varchar)("whatsapp_number", { length: 20 }),
       // +1234567890 format
+      // Threshold settings (defaults)
+      thresholdType: (0, import_pg_core.varchar)("threshold_type", { length: 20 }).default("quantity"),
+      // quantity or percentage
+      thresholdValue: (0, import_pg_core.integer)("threshold_value").default(5),
+      // units or %
+      safetyStock: (0, import_pg_core.integer)("safety_stock").default(10),
+      // for percentage mode
+      // Batching settings
       batchingEnabled: (0, import_pg_core.boolean)("batching_enabled").default(false),
       batchingInterval: (0, import_pg_core.varchar)("batching_interval", { length: 20 }).default("daily"),
       // hourly, daily, weekly
       emailAlertsEnabled: (0, import_pg_core.boolean)("email_alerts_enabled").default(true),
+      // Onboarding & upsell
       isOnboarded: (0, import_pg_core.boolean)("is_onboarded").default(false),
+      dismissedUpsellBanner: (0, import_pg_core.boolean)("dismissed_upsell_banner").default(false),
       createdAt: (0, import_pg_core.timestamp)("created_at").notNull().defaultNow(),
       updatedAt: (0, import_pg_core.timestamp)("updated_at").notNull().defaultNow()
     });
@@ -688,7 +703,9 @@ function setupOnboardingRoutes(router) {
           plan,
           thresholdType,
           thresholdValue,
+          safetyStock,
           notificationMethod,
+          notificationEmail,
           whatsappNumber,
           batchingEnabled,
           batchingInterval
@@ -696,7 +713,8 @@ function setupOnboardingRoutes(router) {
         if (!shop) {
           return res.status(400).json({ error: "Missing shop parameter" });
         }
-        if (!["free", "pro", "premium"].includes(plan)) {
+        const planToSet = plan || "free";
+        if (!["free", "pro", "premium"].includes(planToSet)) {
           return res.status(400).json({ error: "Invalid plan" });
         }
         if (!["quantity", "percentage"].includes(thresholdType)) {
@@ -708,47 +726,57 @@ function setupOnboardingRoutes(router) {
         if (!["hourly", "daily", "weekly"].includes(batchingInterval)) {
           return res.status(400).json({ error: "Invalid batching interval" });
         }
-        if (notificationMethod === "whatsapp" || notificationMethod === "both") {
-          if (!whatsappNumber) {
-            return res.status(400).json({ error: "WhatsApp number required for selected method" });
+        if (notificationMethod === "email" || notificationMethod === "both") {
+          if (!notificationEmail) {
+            return res.status(400).json({ error: "Email address required for selected notification method" });
           }
-          const phoneRegex = /^\+[1-9]\d{1,14}$/;
-          const cleaned = whatsappNumber.replace(/[\s\-()]/g, "");
-          if (!phoneRegex.test("+" + cleaned.replace(/^\+/, ""))) {
-            return res.status(400).json({ error: "Invalid phone number" });
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(notificationEmail)) {
+            return res.status(400).json({ error: "Invalid email address" });
           }
         }
-        await setPlan(shop, plan);
+        if (notificationMethod === "whatsapp" || notificationMethod === "both") {
+          if (!whatsappNumber) {
+            return res.status(400).json({ error: "WhatsApp number required for selected notification method" });
+          }
+          const phoneRegex = /^\+\d{1,3}\d{1,14}$/;
+          const cleaned = whatsappNumber.replace(/[\s\-()]/g, "");
+          if (!phoneRegex.test("+" + cleaned.replace(/^\+/, ""))) {
+            return res.status(400).json({ error: "Invalid phone number format" });
+          }
+        }
+        await setPlan(shop, planToSet);
         const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop)).limit(1);
+        const settingsData = {
+          notificationMethod,
+          notificationEmail: notificationMethod.includes("email") ? notificationEmail : null,
+          whatsappNumber: notificationMethod.includes("whatsapp") ? whatsappNumber : null,
+          thresholdType,
+          thresholdValue,
+          safetyStock: safetyStock || 10,
+          batchingEnabled,
+          batchingInterval,
+          emailAlertsEnabled: notificationMethod !== "whatsapp",
+          isOnboarded: true,
+          updatedAt: /* @__PURE__ */ new Date()
+        };
         if (existing.length > 0) {
-          await db.update(shopSettings).set({
-            whatsappNumber: notificationMethod === "email" ? null : whatsappNumber,
-            batchingEnabled,
-            batchingInterval,
-            emailAlertsEnabled: notificationMethod !== "whatsapp",
-            isOnboarded: true,
-            updatedAt: /* @__PURE__ */ new Date()
-          }).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop));
+          await db.update(shopSettings).set(settingsData).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop));
         } else {
           await db.insert(shopSettings).values({
             shopDomain: shop,
-            whatsappNumber: notificationMethod === "email" ? null : whatsappNumber,
-            batchingEnabled,
-            batchingInterval,
-            emailAlertsEnabled: notificationMethod !== "whatsapp",
-            isOnboarded: true,
-            createdAt: /* @__PURE__ */ new Date(),
-            updatedAt: /* @__PURE__ */ new Date()
+            ...settingsData,
+            createdAt: /* @__PURE__ */ new Date()
           });
         }
         console.log(
-          `[onboarding] Completed for ${shop}: plan=${plan}, threshold=${thresholdType}:${thresholdValue}`
+          `[onboarding] Completed for ${shop}: plan=${planToSet}, threshold=${thresholdType}:${thresholdValue}, notifications=${notificationMethod}`
         );
         res.json({
           success: true,
           message: "Onboarding completed",
           shop,
-          plan
+          plan: planToSet
         });
       } catch (error) {
         console.error("[onboarding] Error completing onboarding:", error);
@@ -778,6 +806,42 @@ function setupOnboardingRoutes(router) {
       res.status(500).json({ error: "Failed to check onboarding status" });
     }
   });
+  router.post(
+    "/api/onboarding/dismiss-banner",
+    async (req, res) => {
+      try {
+        const shop = req.query.shop;
+        if (!shop) {
+          return res.status(400).json({ error: "Missing shop parameter" });
+        }
+        const existing = await db.select().from(shopSettings).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop)).limit(1);
+        if (existing.length > 0) {
+          await db.update(shopSettings).set({
+            dismissedUpsellBanner: true,
+            updatedAt: /* @__PURE__ */ new Date()
+          }).where((0, import_drizzle_orm8.eq)(shopSettings.shopDomain, shop));
+        } else {
+          await db.insert(shopSettings).values({
+            shopDomain: shop,
+            dismissedUpsellBanner: true,
+            createdAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          });
+        }
+        console.log(
+          `[onboarding] Upsell banner dismissed for ${shop}`
+        );
+        res.json({
+          success: true,
+          message: "Banner dismissed",
+          shop
+        });
+      } catch (error) {
+        console.error("[onboarding] Error dismissing banner:", error);
+        res.status(500).json({ error: "Failed to dismiss banner" });
+      }
+    }
+  );
 }
 var import_drizzle_orm8;
 var init_onboarding = __esm({
@@ -1424,7 +1488,7 @@ async function getActiveAlerts(shop) {
     return [];
   }
 }
-async function sendEmailAlert(shop, productName, quantity, threshold, locationName) {
+async function sendEmailAlert(shop, productName, quantity, threshold, _locationName) {
   try {
     const canSend = await canSendEmail(shop);
     if (!canSend) {
@@ -1611,7 +1675,6 @@ async function processInventoryUpdate(shop, payload) {
 // server/webhook-queue.ts
 var webhookQueue = null;
 var queueReady = false;
-var fallbackMode = false;
 var initializeQueue = async () => {
   try {
     webhookQueue = new import_bull.default("webhooks", {
@@ -1642,7 +1705,6 @@ var initializeQueue = async () => {
     });
   } catch (error) {
     console.warn(`[webhook-queue] \u26A0\uFE0F  Redis unavailable (${error.code}), using synchronous fallback`);
-    fallbackMode = true;
     webhookQueue = null;
   }
 };

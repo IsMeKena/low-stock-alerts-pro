@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, boolean, timestamp, integer, smallint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, boolean, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -97,11 +97,21 @@ export type UsageTracker = typeof usageTracker.$inferSelect;
 export const shopSettings = pgTable("shop_settings", {
   id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
   shopDomain: varchar("shop_domain", { length: 255 }).notNull().unique(),
+  // Notification settings
+  notificationMethod: varchar("notification_method", { length: 20 }).default("email"), // email, whatsapp, both
+  notificationEmail: varchar("notification_email", { length: 255 }), // Custom email for alerts
   whatsappNumber: varchar("whatsapp_number", { length: 20 }), // +1234567890 format
+  // Threshold settings (defaults)
+  thresholdType: varchar("threshold_type", { length: 20 }).default("quantity"), // quantity or percentage
+  thresholdValue: integer("threshold_value").default(5), // units or %
+  safetyStock: integer("safety_stock").default(10), // for percentage mode
+  // Batching settings
   batchingEnabled: boolean("batching_enabled").default(false),
   batchingInterval: varchar("batching_interval", { length: 20 }).default("daily"), // hourly, daily, weekly
   emailAlertsEnabled: boolean("email_alerts_enabled").default(true),
+  // Onboarding & upsell
   isOnboarded: boolean("is_onboarded").default(false),
+  dismissedUpsellBanner: boolean("dismissed_upsell_banner").default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

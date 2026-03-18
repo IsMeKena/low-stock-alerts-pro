@@ -7,7 +7,6 @@ import { processProductCreate, processProductUpdate, processInventoryUpdate } fr
  */
 let webhookQueue: Queue.Queue<any> | null = null;
 let queueReady = false;
-let fallbackMode = false;
 
 const initializeQueue = async () => {
   try {
@@ -47,7 +46,6 @@ const initializeQueue = async () => {
     });
   } catch (error: any) {
     console.warn(`[webhook-queue] ⚠️  Redis unavailable (${error.code}), using synchronous fallback`);
-    fallbackMode = true;
     webhookQueue = null;
   }
 };

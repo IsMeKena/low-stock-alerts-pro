@@ -11,6 +11,7 @@ import {
   ProgressBar,
   Divider,
 } from "@shopify/polaris";
+import { UpsellBanner } from "../components/UpsellBanner";
 
 interface DashboardProps {
   shop: string | null;
@@ -26,14 +27,21 @@ interface BillingInfo {
   usageRemaining: number;
 }
 
+interface ShopSettings {
+  notificationMethod: string;
+  dismissedUpsellBanner?: boolean;
+}
+
 export default function Dashboard({ shop }: DashboardProps) {
   const [billing, setBilling] = useState<BillingInfo | null>(null);
+  const [shopSettings, setShopSettings] = useState<ShopSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (shop) {
       fetchBillingInfo();
+      fetchShopSettings();
     }
   }, [shop]);
 
@@ -48,6 +56,37 @@ export default function Dashboard({ shop }: DashboardProps) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchShopSettings = async () => {
+    try {
+      const response = await fetch(`/api/onboarding/status?shop=${shop}`);
+      if (!response.ok) throw new Error("Failed to fetch shop settings");
+
+      const data = await response.json();
+      if (data.plan) {
+        setShopSettings(data.plan);
+      }
+    } catch (err) {
+      console.error("Error fetching shop settings:", err);
+      // Don't fail the whole dashboard if this fails
+    }
+  };
+
+  const handleUpgrade = () => {
+    // Redirect to billing/upgrade page
+    window.location.href = `/billing?shop=${shop}`;
+  };
+
+  const handleDismissBanner = async () => {
+    try {
+      // Optionally persist dismissal in backend
+      await fetch(`/api/onboarding/dismiss-banner?shop=${shop}`, {
+        method: "POST",
+      });
+    } catch (err) {
+      console.error("Error dismissing banner:", err);
     }
   };
 
@@ -112,6 +151,20 @@ export default function Dashboard({ shop }: DashboardProps) {
   return (
     <Box paddingBlockStart="400" paddingBlockEnd="400">
       <Layout>
+        {/* Upsell Banner - Phase 2 */}
+        {shopSettings && (
+          <Layout.Section>
+            <UpsellBanner
+              userPlan={billing?.plan || "free"}
+              selectedWhatsApp={
+                shopSettings.notificationMethod?.includes("whatsapp") || false
+              }
+              onUpgrade={handleUpgrade}
+              onDismiss={handleDismissBanner}
+            />
+          </Layout.Section>
+        )}
+
         {/* Header Section */}
         <Layout.Section>
           <Card>
