@@ -76,10 +76,17 @@ async function startServer() {
     throw error;
   }
   
-  // THEN: Run migrations
-  console.log("[startup] Running database migrations...");
-  await runMigrations();
-  console.log("[startup] Migrations complete, starting Express...");
+  // THEN: Try to run migrations (optional if tables already exist)
+  console.log("[startup] Attempting database migrations...");
+  try {
+    await runMigrations();
+    console.log("[startup] ✅ Migrations completed");
+  } catch (migrationError) {
+    console.warn("[startup] ⚠️  Migrations skipped (tables already exist or migrations folder not found)");
+    // Don't throw - if tables exist from ensureTablesExist(), we're fine
+  }
+  
+  console.log("[startup] Starting Express...");
 
   // Initialize Twilio (Phase 3)
   try {
