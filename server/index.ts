@@ -63,8 +63,10 @@ app.use((req, res, next) => {
 
 async function startServer() {
   // Run migrations before starting the server
+  console.log("[startup] === SERVER STARTUP ===");
   console.log("[startup] Running database migrations...");
   await runMigrations();
+  console.log("[startup] Migrations complete, starting Express...");
 
   // Initialize Twilio (Phase 3)
   try {

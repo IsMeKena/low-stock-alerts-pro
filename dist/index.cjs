@@ -173,15 +173,48 @@ var init_schema = __esm({
 // server/db.ts
 var db_exports = {};
 __export(db_exports, {
-  db: () => db
+  client: () => client,
+  db: () => db,
+  runMigrations: () => runMigrations
 });
-var import_node_postgres, import_pg, databaseUrl, pool, db;
+async function runMigrations() {
+  try {
+    console.log("[db] >>> MIGRATION CHECK STARTING <<<");
+    console.log("[db] NODE_ENV:", process.env.NODE_ENV);
+    const __filename = (0, import_url.fileURLToPath)(import_meta.url);
+    const __dirname = (0, import_path.dirname)(__filename);
+    let migrationsFolder;
+    if (process.env.NODE_ENV === "production") {
+      migrationsFolder = (0, import_path.join)(__dirname, "../drizzle");
+    } else {
+      migrationsFolder = (0, import_path.join)(__dirname, "../drizzle");
+    }
+    console.log("[db] Using migrations path:", migrationsFolder);
+    console.log("[db] Does path exist?", import_fs.default.existsSync(migrationsFolder));
+    console.log("[db] Checking for pending migrations...");
+    await (0, import_migrator.migrate)(db, {
+      migrationsFolder
+    });
+    console.log("[db] \u2705 Migrations completed successfully");
+    return true;
+  } catch (error) {
+    console.error("[db] \u274C Migration error:", error);
+    console.error("[db] Error details:", JSON.stringify(error, null, 2));
+    return false;
+  }
+}
+var import_node_postgres, import_pg, import_migrator, import_url, import_path, import_fs, import_meta, databaseUrl, pool, db, client;
 var init_db = __esm({
   "server/db.ts"() {
     "use strict";
     import_node_postgres = require("drizzle-orm/node-postgres");
     import_pg = require("pg");
+    import_migrator = require("drizzle-orm/node-postgres/migrator");
+    import_url = require("url");
+    import_path = require("path");
+    import_fs = __toESM(require("fs"), 1);
     init_schema();
+    import_meta = {};
     databaseUrl = process.env.DATABASE_URL;
     if (!databaseUrl) {
       throw new Error("DATABASE_URL environment variable is not set");
@@ -190,6 +223,7 @@ var init_db = __esm({
       connectionString: databaseUrl
     });
     db = (0, import_node_postgres.drizzle)(pool, { schema: schema_exports });
+    client = pool;
   }
 });
 
@@ -1351,7 +1385,7 @@ async function registerWebhooks(shop, accessToken) {
     for (const webhook of webhooksToRegister) {
       try {
         console.log(`[webhook] Registering ${webhook.topic} for ${shop}`);
-        const client = new shopify.clients.Rest({
+        const client2 = new shopify.clients.Rest({
           session: {
             shop,
             accessToken,
@@ -1362,7 +1396,7 @@ async function registerWebhooks(shop, accessToken) {
             expires: void 0
           }
         });
-        await client.post({
+        await client2.post({
           path: "/webhooks.json",
           data: {
             webhook: {
@@ -1774,7 +1808,7 @@ init_schema();
 var import_drizzle_orm6 = require("drizzle-orm");
 async function fetchShopifyProducts(shop, accessToken) {
   try {
-    const client = new shopify.clients.Rest({
+    const client2 = new shopify.clients.Rest({
       session: {
         shop,
         accessToken,
@@ -1793,7 +1827,7 @@ async function fetchShopifyProducts(shop, accessToken) {
       if (sinceId) {
         path += `&since_id=${sinceId}`;
       }
-      const response = await client.get({
+      const response = await client2.get({
         path
       });
       if (!response?.body?.products) {
@@ -1878,7 +1912,7 @@ async function syncProducts(shop, accessToken) {
 }
 async function syncInventoryForItem(shop, accessToken, inventoryItemId, productId) {
   try {
-    const client = new shopify.clients.Rest({
+    const client2 = new shopify.clients.Rest({
       session: {
         shop,
         accessToken,
@@ -1888,7 +1922,7 @@ async function syncInventoryForItem(shop, accessToken, inventoryItemId, productI
         id: `offline_${shop}`
       }
     });
-    const response = await client.get({
+    const response = await client2.get({
       path: `/inventory_items/${inventoryItemId}`
     });
     if (!response?.body?.inventory_item) {
@@ -1896,7 +1930,7 @@ async function syncInventoryForItem(shop, accessToken, inventoryItemId, productI
     }
     const item = response.body.inventory_item;
     const sku = item.sku;
-    const locationsResponse = await client.get({
+    const locationsResponse = await client2.get({
       path: `/inventory_levels?inventory_item_ids=${inventoryItemId}`
     });
     if (locationsResponse?.body?.inventory_levels) {
@@ -2252,7 +2286,8 @@ async function registerRoutes(httpServer2, app2) {
 
 // server/index.ts
 var import_http = require("http");
-var import_path = require("path");
+var import_path2 = require("path");
+init_db();
 var app = (0, import_express.default)();
 var httpServer = (0, import_http.createServer)(app);
 app.use(
@@ -2291,7 +2326,11 @@ app.use((req, res, next) => {
   });
   next();
 });
-(async () => {
+async function startServer() {
+  console.log("[startup] === SERVER STARTUP ===");
+  console.log("[startup] Running database migrations...");
+  await runMigrations();
+  console.log("[startup] Migrations complete, starting Express...");
   try {
     const { initTwilio: initTwilio2 } = await Promise.resolve().then(() => (init_twilio_service(), twilio_service_exports));
     const twilioConfig = {
@@ -2327,11 +2366,11 @@ app.use((req, res, next) => {
     return res.status(status).json({ message });
   });
   if (process.env.NODE_ENV === "production") {
-    const staticPath = (0, import_path.join)(process.cwd(), "dist/public");
+    const staticPath = (0, import_path2.join)(process.cwd(), "dist/public");
     app.use(import_express.default.static(staticPath));
     app.use((req, res, next) => {
       if (!req.path.startsWith("/api") && !res.headersSent) {
-        const indexPath = (0, import_path.join)(staticPath, "index.html");
+        const indexPath = (0, import_path2.join)(staticPath, "index.html");
         res.sendFile(indexPath, (err) => {
           if (err) next(err);
         });
@@ -2375,7 +2414,11 @@ app.use((req, res, next) => {
       process.exit(0);
     });
   });
-})();
+}
+startServer().catch((error) => {
+  console.error("[startup] Fatal error:", error);
+  process.exit(1);
+});
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   log

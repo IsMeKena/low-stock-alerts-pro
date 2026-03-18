@@ -5,6 +5,29 @@ import path from "path";
 
 const isDev = process.env.NODE_ENV === "development";
 
+async function copyDir(src: string, dest: string) {
+  // Create destination directory if it doesn't exist
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(dest, { recursive: true });
+  }
+
+  // Read source directory
+  const files = fs.readdirSync(src);
+
+  for (const file of files) {
+    const srcPath = path.join(src, file);
+    const destPath = path.join(dest, file);
+
+    if (fs.statSync(srcPath).isDirectory()) {
+      // Recursively copy subdirectories
+      copyDir(srcPath, destPath);
+    } else {
+      // Copy file
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
 async function main() {
   try {
     // Build client (React + Vite)
@@ -20,6 +43,11 @@ async function main() {
       stdio: "inherit",
     });
     console.log("[build] Server bundled successfully");
+
+    // Copy drizzle migrations to dist
+    console.log("[build] Copying migrations...");
+    copyDir("drizzle", path.join("dist", "drizzle"));
+    console.log("[build] Migrations copied successfully");
 
     // Create startup script
     const startScript = `#!/usr/bin/env node
