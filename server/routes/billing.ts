@@ -207,4 +207,123 @@ export function setupBillingRoutes(router: Router) {
       res.status(500).json({ error: "Failed to get settings" });
     }
   });
+
+  /**
+   * GET /api/settings
+   * Get full settings for the Settings page (plan + thresholds + notifications + batching)
+   * Uses shop query param since session token may not be available
+   */
+  router.get("/api/settings", async (req: Request, res: Response) => {
+    try {
+      const shop = req.query.shop as string;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+
+      const settingsRows = await db
+        .select()
+        .from(shopSettings)
+        .where(eq(shopSettings.shopDomain, shop))
+        .limit(1);
+
+      if (!settingsRows.length) {
+        return res.json({ settings: null });
+      }
+
+      const s = settingsRows[0];
+      const plan = await getUserPlan(shop);
+
+      res.json({
+        settings: {
+          plan,
+          thresholdType: s.thresholdType || "quantity",
+          thresholdValue: s.thresholdValue ?? 5,
+          safetyStock: s.safetyStock ?? 10,
+          notificationMethod: s.notificationMethod || "email",
+          whatsappNumber: s.whatsappNumber || "",
+          batchingEnabled: s.batchingEnabled ?? false,
+          batchingInterval: s.batchingInterval || "daily",
+        },
+      });
+    } catch (error) {
+      console.error("[settings-api] Error getting settings:", error);
+      res.status(500).json({ error: "Failed to get settings" });
+    }
+  });
+
+  /**
+   * POST /api/settings/update
+   * Update all settings from the Settings page
+   * Uses shop from body since session token may not be available
+   */
+  router.post("/api/settings/update", async (req: Request, res: Response) => {
+    try {
+      const {
+        shop,
+        plan,
+        thresholdType,
+        thresholdValue,
+        safetyStock,
+        notificationMethod,
+        whatsappNumber,
+        batchingEnabled,
+        batchingInterval,
+      } = req.body;
+
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+
+      if (whatsappNumber && (notificationMethod === "whatsapp" || notificationMethod === "both")) {
+        const phoneRegex = /^\+[1-9]\d{1,14}$/;
+        if (!phoneRegex.test(whatsappNumber.replace(/[\s\-()]/g, ""))) {
+          return res.status(400).json({ error: "Invalid phone number format" });
+        }
+      }
+
+      const existing = await db
+        .select()
+        .from(shopSettings)
+        .where(eq(shopSettings.shopDomain, shop))
+        .limit(1);
+
+      const settingsData: Record<string, any> = {
+        updatedAt: new Date(),
+      };
+
+      if (thresholdType !== undefined) settingsData.thresholdType = thresholdType;
+      if (thresholdValue !== undefined) settingsData.thresholdValue = thresholdValue;
+      if (safetyStock !== undefined) settingsData.safetyStock = safetyStock;
+      if (notificationMethod !== undefined) settingsData.notificationMethod = notificationMethod;
+      if (whatsappNumber !== undefined) settingsData.whatsappNumber = whatsappNumber || null;
+      if (batchingEnabled !== undefined) settingsData.batchingEnabled = batchingEnabled;
+      if (batchingInterval !== undefined) settingsData.batchingInterval = batchingInterval;
+      if (notificationMethod !== undefined) {
+        settingsData.emailAlertsEnabled = notificationMethod !== "whatsapp";
+      }
+
+      if (existing.length > 0) {
+        await db
+          .update(shopSettings)
+          .set(settingsData)
+          .where(eq(shopSettings.shopDomain, shop));
+      } else {
+        await db.insert(shopSettings).values({
+          shopDomain: shop,
+          ...settingsData,
+          createdAt: new Date(),
+        });
+      }
+
+      console.log(`[settings-api] Settings updated for ${shop}`);
+
+      res.json({
+        success: true,
+        message: "Settings updated",
+      });
+    } catch (error) {
+      console.error("[settings-api] Error updating settings:", error);
+      res.status(500).json({ error: "Failed to update settings" });
+    }
+  });
 }
