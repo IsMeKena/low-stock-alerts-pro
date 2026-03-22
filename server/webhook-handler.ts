@@ -2,9 +2,6 @@ import crypto from "crypto";
 import type { Request } from "express";
 import { shopify } from "./shopify";
 
-/**
- * Verify Shopify webhook signature
- */
 export function verifyWebhookSignature(
   req: Request,
   secret: string
@@ -27,12 +24,13 @@ export function verifyWebhookSignature(
       .update(body.toString("utf8"))
       .digest("base64");
 
-    const verified = computed === hmacHeader;
+    const verified = crypto.timingSafeEqual(
+      Buffer.from(computed),
+      Buffer.from(hmacHeader)
+    );
 
     if (!verified) {
       console.log("[webhook] Invalid signature");
-      console.log(`[webhook] Expected: ${computed}`);
-      console.log(`[webhook] Got: ${hmacHeader}`);
     }
 
     return verified;
@@ -42,88 +40,63 @@ export function verifyWebhookSignature(
   }
 }
 
-/**
- * Get shop from webhook
- */
 export function getShopFromWebhook(req: Request): string | null {
-  try {
-    const shop = req.headers["x-shopify-shop-api-call-limit"] as string;
-    if (shop) {
-      return shop.split("/")[1];
-    }
+  const shopDomain = req.headers["x-shopify-shop-domain"] as string;
+  if (shopDomain) return shopDomain;
 
-    const topicHeader = req.headers["x-shopify-topic"] as string;
-    if (!topicHeader) return null;
-
-    // Topic format: "products/create", extract from shop param
-    const shopHeader = req.headers["x-shopify-shop-id"] as string;
-    return shopHeader || null;
-  } catch (error) {
-    console.error("[webhook] Error getting shop:", error);
-    return null;
-  }
+  const shopHeader = req.headers["x-shopify-shop-id"] as string;
+  return shopHeader || null;
 }
 
-/**
- * Register webhooks for a shop
- */
 export async function registerWebhooks(
   shop: string,
   accessToken: string
 ): Promise<boolean> {
   try {
-    const baseUrl = process.env.APP_URL || "https://localhost";
+    const baseUrl = process.env.APP_URL || process.env.HOST || "";
+
+    if (!baseUrl) {
+      console.error("[webhook] APP_URL or HOST env var is not set — cannot register webhooks");
+      return false;
+    }
+
+    if (!accessToken) {
+      console.error(`[webhook] No access token for ${shop} — cannot register webhooks`);
+      return false;
+    }
+
+    console.log(`[webhook] Registering webhooks for ${shop} with base URL: ${baseUrl}`);
 
     const webhooksToRegister = [
-      {
-        topic: "app/uninstalled",
-        address: `${baseUrl}/api/webhooks/app/uninstalled`,
-      },
-      {
-        topic: "products/create",
-        address: `${baseUrl}/api/webhooks/products/create`,
-      },
-      {
-        topic: "products/update",
-        address: `${baseUrl}/api/webhooks/products/update`,
-      },
-      {
-        topic: "inventory_levels/update",
-        address: `${baseUrl}/api/webhooks/inventory_levels/update`,
-      },
-      {
-        topic: "customers/data_request",
-        address: `${baseUrl}/api/webhooks/customers/data_request`,
-      },
-      {
-        topic: "customers/redact",
-        address: `${baseUrl}/api/webhooks/customers/redact`,
-      },
-      {
-        topic: "shop/redact",
-        address: `${baseUrl}/api/webhooks/shop/redact`,
-      },
+      { topic: "app/uninstalled", address: `${baseUrl}/api/webhooks/app/uninstalled` },
+      { topic: "products/create", address: `${baseUrl}/api/webhooks/products/create` },
+      { topic: "products/update", address: `${baseUrl}/api/webhooks/products/update` },
+      { topic: "inventory_levels/update", address: `${baseUrl}/api/webhooks/inventory_levels/update` },
+      { topic: "customers/data_request", address: `${baseUrl}/api/webhooks/customers/data_request` },
+      { topic: "customers/redact", address: `${baseUrl}/api/webhooks/customers/redact` },
+      { topic: "shop/redact", address: `${baseUrl}/api/webhooks/shop/redact` },
     ];
+
+    const client = new shopify.clients.Rest({
+      session: {
+        shop,
+        accessToken,
+        scope: "",
+        state: "",
+        isOnline: false,
+        id: `offline_${shop}`,
+        expires: undefined,
+      } as any,
+    });
+
+    let successCount = 0;
 
     for (const webhook of webhooksToRegister) {
       try {
-        console.log(`[webhook] Registering ${webhook.topic} for ${shop}`);
-
-        // Use Shopify REST API to register webhook
-        const client = new shopify.clients.Rest({
-          session: {
-            shop,
-            accessToken,
-            scope: "",
-            state: "",
-            isOnline: false,
-            id: `offline_${shop}`,
-            expires: undefined,
-          } as any,
-        });
+        console.log(`[webhook] Registering ${webhook.topic} → ${webhook.address}`);
 
         await client.post({
-          path: "/webhooks.json",
+          path: "webhooks",
           data: {
             webhook: {
               topic: webhook.topic,
@@ -133,23 +106,54 @@ export async function registerWebhooks(
           },
         });
 
-        console.log(`[webhook] Successfully registered ${webhook.topic}`);
-      } catch (error) {
-        console.error(`[webhook] Failed to register ${webhook.topic}:`, error);
-        // Don't fail on individual webhook registration
+        successCount++;
+        console.log(`[webhook] ✅ Registered ${webhook.topic}`);
+      } catch (error: any) {
+        const statusCode = error?.response?.code || error?.code || "unknown";
+        const body = error?.response?.body || error?.message || "unknown error";
+
+        if (statusCode === 409 || String(body).includes("already been taken")) {
+          console.log(`[webhook] ⚠️ ${webhook.topic} already registered (updating)`);
+          try {
+            const existing = await client.get({ path: "webhooks" });
+            const webhooks = (existing?.body as any)?.webhooks || [];
+            const match = webhooks.find((w: any) => w.topic === webhook.topic);
+            if (match) {
+              await client.put({
+                path: `webhooks/${match.id}`,
+                data: {
+                  webhook: {
+                    id: match.id,
+                    address: webhook.address,
+                  },
+                },
+              });
+              successCount++;
+              console.log(`[webhook] ✅ Updated ${webhook.topic}`);
+            }
+          } catch (updateErr) {
+            console.error(`[webhook] ❌ Failed to update ${webhook.topic}:`, updateErr);
+          }
+        } else {
+          console.error(
+            `[webhook] ❌ Failed to register ${webhook.topic} (status=${statusCode}):`,
+            typeof body === "string" ? body : JSON.stringify(body)
+          );
+        }
       }
     }
 
-    return true;
+    console.log(
+      `[webhook] Registration complete: ${successCount}/${webhooksToRegister.length} webhooks registered for ${shop}`
+    );
+
+    return successCount > 0;
   } catch (error) {
     console.error("[webhook] Error registering webhooks:", error);
     return false;
   }
 }
 
-/**
- * Log webhook event
- */
 export function logWebhookEvent(
   topic: string,
   shop: string,
