@@ -15,11 +15,16 @@ import {
   List,
   Icon,
   Divider,
+  Button,
+  Box,
+  Spinner,
 } from "@shopify/polaris";
 import {
   ChartVerticalFilledIcon,
   EmailIcon,
   ChatIcon,
+  CheckCircleIcon,
+  StarFilledIcon,
 } from "@shopify/polaris-icons";
 import { useNavigate } from "react-router-dom";
 import { authenticatedFetch } from "../utils/fetch";
@@ -31,6 +36,7 @@ interface BillingProps {
 interface BillingData {
   plan: string;
   usage: {
+    plan: string;
     month: string;
     emailUsed: number;
     emailLimit: number | string;
@@ -41,10 +47,64 @@ interface BillingData {
   tiers: Record<string, any>;
 }
 
+const PLANS = [
+  {
+    key: "free",
+    name: "Free",
+    price: "$0",
+    priceNote: "forever",
+    features: [
+      "10 email alerts per month",
+      "Basic low stock monitoring",
+      "Email notifications",
+      "Single threshold setting",
+    ],
+    missing: [
+      "WhatsApp notifications",
+      "Alert batching / digests",
+      "Priority support",
+    ],
+  },
+  {
+    key: "pro",
+    name: "Pro",
+    price: "$9.99",
+    priceNote: "per month",
+    features: [
+      "500 email alerts per month",
+      "Advanced threshold settings",
+      "Alert batching / digest mode",
+      "Email notifications",
+      "Hourly, daily, or weekly digests",
+    ],
+    missing: [
+      "WhatsApp notifications",
+      "Priority support",
+    ],
+  },
+  {
+    key: "premium",
+    name: "Premium",
+    price: "$24.99",
+    priceNote: "per month",
+    features: [
+      "Unlimited email alerts",
+      "WhatsApp notifications",
+      "Advanced threshold settings",
+      "Alert batching / digest mode",
+      "Priority support",
+      "All future features included",
+    ],
+    missing: [],
+  },
+];
+
 export default function Billing({ shop }: BillingProps) {
   const [billing, setBilling] = useState<BillingData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [upgrading, setUpgrading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const fetchBilling = useCallback(async () => {
@@ -65,20 +125,55 @@ export default function Billing({ shop }: BillingProps) {
     fetchBilling();
   }, [fetchBilling]);
 
+  const handleUpgrade = async (planKey: string) => {
+    if (!shop) return;
+    setUpgrading(planKey);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const response = await authenticatedFetch("/api/billing/upgrade", {
+        method: "POST",
+        body: JSON.stringify({ shop, plan: planKey }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to change plan");
+      }
+
+      const data = await response.json();
+      setSuccessMsg(
+        `Plan changed to ${planKey.charAt(0).toUpperCase() + planKey.slice(1)}!`
+      );
+      await fetchBilling();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to change plan");
+    } finally {
+      setUpgrading(null);
+    }
+  };
+
   if (loading) {
     return (
-      <SkeletonPage title="Billing" backAction>
+      <SkeletonPage title="Plans & Billing" backAction>
         <Layout>
-          <Layout.Section>
+          <Layout.Section variant="oneThird">
             <Card>
               <SkeletonDisplayText size="small" />
-              <SkeletonBodyText lines={4} />
+              <SkeletonBodyText lines={6} />
             </Card>
           </Layout.Section>
-          <Layout.Section>
+          <Layout.Section variant="oneThird">
             <Card>
               <SkeletonDisplayText size="small" />
-              <SkeletonBodyText lines={3} />
+              <SkeletonBodyText lines={6} />
+            </Card>
+          </Layout.Section>
+          <Layout.Section variant="oneThird">
+            <Card>
+              <SkeletonDisplayText size="small" />
+              <SkeletonBodyText lines={6} />
             </Card>
           </Layout.Section>
         </Layout>
@@ -86,7 +181,7 @@ export default function Billing({ shop }: BillingProps) {
     );
   }
 
-  const planName = billing?.plan || "free";
+  const currentPlan = billing?.usage?.plan || billing?.plan || "free";
   const usage = billing?.usage;
 
   const emailPercent =
@@ -99,9 +194,12 @@ export default function Billing({ shop }: BillingProps) {
       ? Math.round((usage.whatsappUsed / usage.whatsappLimit) * 100)
       : 0;
 
+  const planOrder = ["free", "pro", "premium"];
+  const currentPlanIndex = planOrder.indexOf(currentPlan);
+
   return (
     <Page
-      title="Billing"
+      title="Plans & Billing"
       backAction={{ content: "Dashboard", onAction: () => navigate("/") }}
     >
       <Layout>
@@ -113,71 +211,108 @@ export default function Billing({ shop }: BillingProps) {
           </Layout.Section>
         )}
 
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="400">
-              <InlineStack align="space-between" blockAlign="center">
-                <BlockStack gap="100">
-                  <Text as="h2" variant="headingLg">
-                    Current plan
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {usage?.month || "Current month"}
-                  </Text>
+        {successMsg && (
+          <Layout.Section>
+            <Banner tone="success" onDismiss={() => setSuccessMsg(null)}>
+              <p>{successMsg}</p>
+            </Banner>
+          </Layout.Section>
+        )}
+
+        {PLANS.map((plan) => {
+          const isCurrentPlan = plan.key === currentPlan;
+          const planIndex = planOrder.indexOf(plan.key);
+          const isUpgrade = planIndex > currentPlanIndex;
+          const isDowngrade = planIndex < currentPlanIndex;
+
+          return (
+            <Layout.Section variant="oneThird" key={plan.key}>
+              <Card>
+                <BlockStack gap="400">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <BlockStack gap="100">
+                      <InlineStack gap="200" blockAlign="center">
+                        {plan.key === "premium" && (
+                          <Icon source={StarFilledIcon} tone="warning" />
+                        )}
+                        <Text as="h2" variant="headingLg">
+                          {plan.name}
+                        </Text>
+                      </InlineStack>
+                      <InlineStack gap="100" blockAlign="end">
+                        <Text as="span" variant="headingXl">
+                          {plan.price}
+                        </Text>
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          {plan.priceNote}
+                        </Text>
+                      </InlineStack>
+                    </BlockStack>
+                    {isCurrentPlan && (
+                      <Badge tone="success" size="large">
+                        CURRENT
+                      </Badge>
+                    )}
+                  </InlineStack>
+
+                  <Divider />
+
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingSm">
+                      Included
+                    </Text>
+                    <List>
+                      {plan.features.map((feature, i) => (
+                        <List.Item key={i}>{feature}</List.Item>
+                      ))}
+                    </List>
+                  </BlockStack>
+
+                  {plan.missing.length > 0 && (
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingSm" tone="subdued">
+                        Not included
+                      </Text>
+                      {plan.missing.map((feature, i) => (
+                        <Text key={i} as="p" variant="bodySm" tone="subdued">
+                          — {feature}
+                        </Text>
+                      ))}
+                    </BlockStack>
+                  )}
+
+                  <Box paddingBlockStart="200">
+                    {isCurrentPlan ? (
+                      <Button disabled fullWidth>
+                        Current plan
+                      </Button>
+                    ) : isUpgrade ? (
+                      <Button
+                        variant="primary"
+                        fullWidth
+                        onClick={() => handleUpgrade(plan.key)}
+                        loading={upgrading === plan.key}
+                        disabled={!!upgrading}
+                      >
+                        Upgrade to {plan.name}
+                      </Button>
+                    ) : (
+                      <Button
+                        fullWidth
+                        onClick={() => handleUpgrade(plan.key)}
+                        loading={upgrading === plan.key}
+                        disabled={!!upgrading}
+                        tone="critical"
+                      >
+                        Downgrade to {plan.name}
+                      </Button>
+                    )}
+                  </Box>
                 </BlockStack>
-                <Badge
-                  tone={
-                    planName === "premium"
-                      ? "success"
-                      : planName === "pro"
-                        ? "attention"
-                        : "info"
-                  }
-                  size="large"
-                >
-                  {planName.toUpperCase()}
-                </Badge>
-              </InlineStack>
-
-              <Divider />
-
-              <BlockStack gap="300">
-                <Text as="h3" variant="headingMd">
-                  Plan features
-                </Text>
-                {planName === "free" && (
-                  <List>
-                    <List.Item>50 email alerts per month</List.Item>
-                    <List.Item>Basic low stock monitoring</List.Item>
-                    <List.Item>Email notifications only</List.Item>
-                  </List>
-                )}
-                {planName === "pro" && (
-                  <List>
-                    <List.Item>500 email alerts per month</List.Item>
-                    <List.Item>Advanced threshold settings</List.Item>
-                    <List.Item>Alert batching / digest mode</List.Item>
-                    <List.Item>Email notifications</List.Item>
-                  </List>
-                )}
-                {planName === "premium" && (
-                  <List>
-                    <List.Item>Unlimited email alerts</List.Item>
-                    <List.Item>WhatsApp notifications</List.Item>
-                    <List.Item>Advanced threshold settings</List.Item>
-                    <List.Item>Alert batching / digest mode</List.Item>
-                    <List.Item>Priority support</List.Item>
-                  </List>
-                )}
-              </BlockStack>
-
-              <Text as="p" variant="bodySm" tone="subdued">
-                To change your plan, visit the app listing in your Shopify admin
-                under Apps.
-              </Text>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+              </Card>
+            </Layout.Section>
+          );
+        })}
 
         {usage && (
           <Layout.Section>
@@ -187,6 +322,9 @@ export default function Billing({ shop }: BillingProps) {
                   <Icon source={ChartVerticalFilledIcon} tone="base" />
                   <Text as="h2" variant="headingLg">
                     Usage this month
+                  </Text>
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    ({usage.month})
                   </Text>
                 </InlineStack>
 
@@ -205,7 +343,7 @@ export default function Billing({ shop }: BillingProps) {
                       {typeof usage.emailLimit === "number"
                         ? usage.emailLimit
                         : usage.emailLimit}{" "}
-                      used
+                      sent
                     </Text>
                     <Text as="span" variant="bodySm" tone="subdued">
                       {emailPercent}%
@@ -218,7 +356,7 @@ export default function Billing({ shop }: BillingProps) {
                   />
                 </BlockStack>
 
-                {(planName === "premium") && (
+                {currentPlan === "premium" && (
                   <BlockStack gap="300">
                     <InlineStack gap="200" blockAlign="center">
                       <Icon source={ChatIcon} tone="base" />
@@ -232,7 +370,7 @@ export default function Billing({ shop }: BillingProps) {
                         {typeof usage.whatsappLimit === "number"
                           ? usage.whatsappLimit
                           : usage.whatsappLimit}{" "}
-                        used
+                        sent
                       </Text>
                       <Text as="span" variant="bodySm" tone="subdued">
                         {whatsappPercent}%
@@ -249,6 +387,15 @@ export default function Billing({ shop }: BillingProps) {
             </Card>
           </Layout.Section>
         )}
+
+        <Layout.Section>
+          <Box paddingBlockEnd="800">
+            <Text as="p" variant="bodySm" tone="subdued" alignment="center">
+              Plan changes take effect immediately. Usage counters reset at the
+              start of each month. Need help? Contact support.
+            </Text>
+          </Box>
+        </Layout.Section>
       </Layout>
     </Page>
   );

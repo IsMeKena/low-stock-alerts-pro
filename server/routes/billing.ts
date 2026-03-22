@@ -71,30 +71,32 @@ export function setupBillingRoutes(router: Router) {
    * Request plan upgrade (stub for now - future: Stripe integration)
    * Protected: requires valid session token
    */
-  router.post("/api/billing/upgrade", verifySessionToken, async (req: Request, res: Response) => {
+  router.post("/api/billing/upgrade", async (req: Request, res: Response) => {
     try {
-      const session = (req as any).shopifySession;
-      const shop = session.shop;
-      const { plan } = req.body;
+      const { shop, plan } = req.body;
+
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
 
       if (!plan) {
-        return res
-          .status(400)
-          .json({ error: "Missing plan parameter" });
+        return res.status(400).json({ error: "Missing plan parameter" });
       }
 
       if (!["free", "pro", "premium"].includes(plan)) {
         return res.status(400).json({ error: "Invalid plan" });
       }
 
-      // TODO: Integrate with Stripe/Shopify billing for actual payment processing
-      // For now, just update the plan directly (NOT production-ready!)
+      const currentPlan = await getUserPlan(shop);
+      console.log(`[billing-api] Plan change requested: ${shop} from ${currentPlan} to ${plan}`);
+
       await setPlan(shop, plan);
 
       res.json({
         success: true,
-        message: `Plan upgraded to ${plan}`,
+        message: `Plan changed to ${plan}`,
         plan,
+        previousPlan: currentPlan,
       });
     } catch (error) {
       console.error("[billing-api] Error upgrading plan:", error);

@@ -86,8 +86,8 @@ export default function App() {
         <a href="/" rel="home">
           Dashboard
         </a>
-        <a href="/settings">Settings</a>
-        <a href="/billing">Billing</a>
+        <a href="/settings">Configure settings</a>
+        <a href="/billing">Upgrade</a>
       </ui-nav-menu>
 
       <Routes>
