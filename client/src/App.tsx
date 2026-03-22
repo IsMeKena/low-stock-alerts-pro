@@ -58,10 +58,12 @@ export default function App() {
       if (data.installed) {
         checkOnboardingStatus(shopDomain);
       } else {
-        window.location.href = `/api/auth?shop=${shopDomain}`;
+        const embedded = window.top !== window.self ? "&embedded=1" : "";
+        window.location.href = `/api/auth?shop=${shopDomain}${embedded}`;
       }
     } catch {
-      window.location.href = `/api/auth?shop=${shopDomain}`;
+      const embedded = window.top !== window.self ? "&embedded=1" : "";
+      window.location.href = `/api/auth?shop=${shopDomain}${embedded}`;
     }
   };
 

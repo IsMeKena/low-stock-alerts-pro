@@ -42,13 +42,23 @@ export async function registerRoutes(
 
       console.log(`[auth] Beginning OAuth flow for ${sanitizedShop}`);
 
-      await shopify.auth.begin({
-        shop: sanitizedShop,
-        callbackPath: "/api/auth/callback",
-        isOnline: false,
-        rawRequest: req,
-        rawResponse: res,
-      });
+      const appUrl = process.env.APP_URL ||
+        (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
+      const scopes = process.env.SCOPES ||
+        "write_products,read_products,write_inventory,read_inventory,write_webhooks,read_webhooks";
+      const nonce = Math.random().toString(36).substring(2);
+      const callbackUrl = `${appUrl}/api/auth/callback`;
+      const authUrl = `https://${sanitizedShop}/admin/oauth/authorize?client_id=${process.env.SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${encodeURIComponent(callbackUrl)}&state=${nonce}`;
+
+      const isEmbedded = req.query.embedded === "1" || req.headers["sec-fetch-dest"] === "iframe";
+
+      if (isEmbedded) {
+        console.log(`[auth] Embedded context detected, using top-level redirect`);
+        res.setHeader("Content-Type", "text/html");
+        res.send(`<!DOCTYPE html><html><head><script>window.top.location.href = "${authUrl}";</script></head><body>Redirecting to Shopify...</body></html>`);
+      } else {
+        res.redirect(authUrl);
+      }
     } catch (error) {
       console.error("Auth begin error:", error);
       res.status(500).json({ error: "Failed to begin authentication" });
