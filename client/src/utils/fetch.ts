@@ -1,10 +1,19 @@
+declare global {
+  interface Window {
+    __originalFetch: typeof fetch;
+    shopify?: {
+      idToken: () => Promise<string>;
+    };
+  }
+}
+
 /**
  * Authenticated fetch utility for Shopify embedded apps.
  *
- * In App Bridge v4, the global fetch is automatically patched inside
- * the Shopify Admin iframe to include the session token. This wrapper
- * adds a manual fallback for contexts where the patch isn't active
- * (e.g., development outside the Admin).
+ * Uses the ORIGINAL (unpatched) fetch to avoid App Bridge's patched
+ * fetch hanging when sessions are not yet established. Manually
+ * attaches the session token via window.shopify.idToken() when
+ * available.
  */
 export async function authenticatedFetch(
   url: string,
@@ -20,7 +29,7 @@ export async function authenticatedFetch(
     try {
       const token = await Promise.race([
         window.shopify.idToken(),
-        new Promise<null>((_, reject) =>
+        new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("idToken timeout")), 3000)
         ),
       ]);
@@ -32,5 +41,6 @@ export async function authenticatedFetch(
     }
   }
 
-  return fetch(url, { ...options, headers });
+  const fetchFn = window.__originalFetch || window.fetch;
+  return fetchFn(url, { ...options, headers });
 }
