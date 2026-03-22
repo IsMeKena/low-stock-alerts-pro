@@ -79,7 +79,7 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
       const [billingRes, settingsRes, alertsRes] = await Promise.all([
         authenticatedFetch(`/api/billing/plan?shop=${shop}`),
         authenticatedFetch(`/api/onboarding/status?shop=${shop}`),
-        authenticatedFetch(`/api/alerts/active?shop=${shop}`).catch(() => null),
+        authenticatedFetch(`/api/alerts?shop=${shop}`).catch(() => null),
       ]);
 
       if (billingRes.ok) {

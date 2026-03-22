@@ -111,33 +111,39 @@ async function startServer() {
   // Register all routes
   await registerRoutes(httpServer, app);
 
-  // Re-register webhooks for all existing shops on startup
+  // Re-register webhooks for all existing shops on startup (run in background)
   // This ensures shops installed before new webhooks were added get them registered
-  try {
-    const { db } = await import("./db");
-    const { shopifySessions } = await import("@shared/schema.ts");
-    const { registerWebhooks } = await import("./webhook-handler");
-    const { sql } = await import("drizzle-orm");
+  setTimeout(async () => {
+    try {
+      const { db } = await import("./db");
+      const { shopifySessions } = await import("@shared/schema.ts");
+      const { registerWebhooks } = await import("./webhook-handler");
+      const { isNotNull } = await import("drizzle-orm");
 
-    const sessions = await db
-      .select()
-      .from(shopifySessions)
-      .where(sql`${shopifySessions.accessToken} IS NOT NULL`);
+      const sessions = await db
+        .select()
+        .from(shopifySessions)
+        .where(isNotNull(shopifySessions.accessToken));
 
-    if (sessions.length > 0) {
-      log(`Re-registering webhooks for ${sessions.length} existing shop(s)...`);
-      for (const session of sessions) {
-        try {
-          await registerWebhooks(session.shop, session.accessToken!);
-          log(`Webhooks re-registered for ${session.shop}`);
-        } catch (err) {
-          console.error(`Failed to re-register webhooks for ${session.shop}:`, err);
+      log(`[startup] Found ${sessions.length} session(s) for webhook re-registration`);
+
+      if (sessions.length > 0) {
+        for (const session of sessions) {
+          try {
+            log(`[startup] Re-registering webhooks for ${session.shop}...`);
+            await registerWebhooks(session.shop, session.accessToken!);
+            log(`[startup] Webhooks re-registered for ${session.shop}`);
+          } catch (err) {
+            console.error(`[startup] Failed to re-register webhooks for ${session.shop}:`, err);
+          }
         }
+      } else {
+        log("[startup] No existing sessions found — skipping webhook re-registration");
       }
+    } catch (error) {
+      console.error("[startup] Webhook re-registration failed:", error);
     }
-  } catch (error) {
-    console.error("[startup] Webhook re-registration failed:", error);
-  }
+  }, 5000);
 
   // Error handling middleware
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

@@ -16,10 +16,12 @@ export function setupBillingRoutes(router: Router) {
    * Get current billing plan and usage stats
    * Protected: requires valid session token
    */
-  router.get("/api/billing/plan", verifySessionToken, async (req: Request, res: Response) => {
+  router.get("/api/billing/plan", async (req: Request, res: Response) => {
     try {
-      const session = (req as any).shopifySession;
-      const shop = session.shop;
+      const shop = req.query.shop as string;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
 
       const plan = await getUserPlan(shop);
       const usage = await getRemainingUsage(shop);

@@ -292,16 +292,17 @@ export async function registerRoutes(
   // Get active alerts
   app.get(
     "/api/alerts",
-    verifySessionToken,
-    checkRateLimitThreshold,
-    logApiCall,
     async (req: Request, res: Response) => {
     try {
-      const session = (req as any).shopifySession;
-      const activeAlerts = await getActiveAlerts(session.shop);
+      const shop = req.query.shop as string;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+
+      const activeAlerts = await getActiveAlerts(shop);
 
       res.json({
-        shop: session.shop,
+        shop,
         alerts: activeAlerts,
         count: activeAlerts.length,
       });
