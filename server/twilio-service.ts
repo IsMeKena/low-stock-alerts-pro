@@ -90,13 +90,26 @@ export async function sendWhatsAppMessage(
       };
     }
 
+    // Validate the FROM number
+    const fromNumber = process.env.TWILIO_WHATSAPP_FROM || "";
+    if (!fromNumber || !validateWhatsAppNumber(fromNumber)) {
+      console.error(`[twilio] TWILIO_WHATSAPP_FROM is not set or invalid: "${fromNumber}"`);
+      return {
+        success: false,
+        error: `TWILIO_WHATSAPP_FROM environment variable is not set or invalid. Current value: "${fromNumber}". Set it to your Twilio WhatsApp-enabled number (e.g., +14155238886).`,
+      };
+    }
+
+    const normalizedFrom = normalizePhoneNumber(fromNumber);
+    console.log(`[twilio] Sending from whatsapp:${normalizedFrom} to whatsapp:${normalizedNumber}`);
+
     // Send via Twilio with retry logic
     let lastError: any;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const response = await twilioClient.messages.create({
-          from: `whatsapp:${normalizePhoneNumber(process.env.TWILIO_WHATSAPP_FROM || "")}`,
+          from: `whatsapp:${normalizedFrom}`,
           to: `whatsapp:${normalizedNumber}`,
           body: message,
         });
