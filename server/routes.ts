@@ -356,6 +356,54 @@ export async function registerRoutes(
   );
 
   // ============================================
+  // Test notification endpoints
+  // ============================================
+
+  app.post("/api/test/whatsapp", async (req: Request, res: Response) => {
+    try {
+      const { shop, phoneNumber } = req.body;
+
+      if (!phoneNumber) {
+        res.status(400).json({ error: "Missing phoneNumber" });
+        return;
+      }
+
+      console.log(`[test] Sending test WhatsApp to ${phoneNumber}`);
+
+      const { sendWhatsAppMessage, formatAlertMessage } = await import("./twilio-service");
+
+      const message = formatAlertMessage(
+        "Test Product — Low Stock Alert",
+        3,
+        5,
+        "Main Warehouse"
+      );
+
+      const result = await sendWhatsAppMessage(phoneNumber, message);
+
+      if (result.success) {
+        console.log(`[test] WhatsApp test sent successfully: ${result.messageId}`);
+        res.json({
+          success: true,
+          messageId: result.messageId,
+          simulated: result.messageId?.startsWith("simulated_") || false,
+        });
+      } else {
+        console.error(`[test] WhatsApp test failed: ${result.error}`);
+        res.status(500).json({
+          success: false,
+          error: result.error,
+        });
+      }
+    } catch (error: any) {
+      console.error("[test] Error sending test WhatsApp:", error);
+      res.status(500).json({
+        error: error.message || "Failed to send test message",
+      });
+    }
+  });
+
+  // ============================================
   // Webhook routes
   // ============================================
 
