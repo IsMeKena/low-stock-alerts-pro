@@ -16,16 +16,19 @@ export async function authenticatedFetch(
     headers.set("Content-Type", "application/json");
   }
 
-  // In App Bridge v4 embedded context, fetch is already patched.
-  // As a safety net, if shopify global is available but the fetch
-  // wasn't patched (e.g., pop-out window), manually attach the token.
   if (window.shopify && !headers.has("Authorization")) {
     try {
-      const token = await window.shopify.idToken();
-      headers.set("Authorization", `Bearer ${token}`);
+      const token = await Promise.race([
+        window.shopify.idToken(),
+        new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error("idToken timeout")), 3000)
+        ),
+      ]);
+      if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
     } catch {
-      // Token retrieval failed — proceed without it;
-      // the server will return 401 and App Bridge will handle re-auth.
+      // Token retrieval failed or timed out — proceed without it
     }
   }
 
