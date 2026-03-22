@@ -576,6 +576,34 @@ export async function registerRoutes(
     }
   });
 
+  // Admin endpoint: manually clean up data for a shop (e.g., after failed uninstall webhook)
+  app.delete("/api/admin/shop-data", async (req: Request, res: Response) => {
+    try {
+      const adminSecret = process.env.ADMIN_SECRET;
+      const authHeader = req.headers.authorization;
+
+      if (!adminSecret || authHeader !== `Bearer ${adminSecret}`) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const shop = req.query.shop as string;
+      if (!shop) {
+        res.status(400).json({ error: "Missing shop parameter" });
+        return;
+      }
+
+      const { processAppUninstalled } = await import("./webhook-processors");
+      await processAppUninstalled(shop, {});
+
+      console.log(`[admin] Manually cleaned up data for ${shop}`);
+      res.json({ success: true, message: `All data deleted for ${shop}` });
+    } catch (error) {
+      console.error("[admin] Error cleaning up shop data:", error);
+      res.status(500).json({ error: "Failed to clean up shop data" });
+    }
+  });
+
   console.log("[routes] Auth, shop, and webhook routes registered");
 
   // Register billing and onboarding routes

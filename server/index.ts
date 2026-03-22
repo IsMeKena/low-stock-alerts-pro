@@ -111,6 +111,34 @@ async function startServer() {
   // Register all routes
   await registerRoutes(httpServer, app);
 
+  // Re-register webhooks for all existing shops on startup
+  // This ensures shops installed before new webhooks were added get them registered
+  try {
+    const { db } = await import("./db");
+    const { shopifySessions } = await import("@shared/schema.ts");
+    const { registerWebhooks } = await import("./webhook-handler");
+    const { sql } = await import("drizzle-orm");
+
+    const sessions = await db
+      .select()
+      .from(shopifySessions)
+      .where(sql`${shopifySessions.accessToken} IS NOT NULL`);
+
+    if (sessions.length > 0) {
+      log(`Re-registering webhooks for ${sessions.length} existing shop(s)...`);
+      for (const session of sessions) {
+        try {
+          await registerWebhooks(session.shop, session.accessToken!);
+          log(`Webhooks re-registered for ${session.shop}`);
+        } catch (err) {
+          console.error(`Failed to re-register webhooks for ${session.shop}:`, err);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("[startup] Webhook re-registration failed:", error);
+  }
+
   // Error handling middleware
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
