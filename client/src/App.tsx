@@ -4,6 +4,7 @@ import { Frame, Loading } from "@shopify/polaris";
 import Onboarding from "./pages/Onboarding";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
+import Billing from "./pages/Billing";
 import { authenticatedFetch } from "./utils/fetch";
 
 export default function App() {
@@ -86,6 +87,7 @@ export default function App() {
           Dashboard
         </a>
         <a href="/settings">Settings</a>
+        <a href="/billing">Billing</a>
       </ui-nav-menu>
 
       <Routes>
@@ -96,6 +98,10 @@ export default function App() {
         <Route
           path="/settings"
           element={<Settings shop={shop} />}
+        />
+        <Route
+          path="/billing"
+          element={<Billing shop={shop} />}
         />
         <Route
           path="/onboarding"

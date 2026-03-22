@@ -359,223 +359,148 @@ export async function registerRoutes(
   // Webhook routes
   // ============================================
 
-  // Helper to extract shop from webhook payload
-  const getShopFromPayload = (body: any): string | null => {
-    return body?.shop?.id ? `${body.shop.id}.myshopify.com` : null;
+  // Helper to extract shop from webhook headers or payload
+  const getShopFromWebhookRequest = (req: Request): string | null => {
+    const fromHeader = req.headers["x-shopify-shop-domain"] as string;
+    if (fromHeader) return fromHeader;
+    if (req.body?.shop_domain) return req.body.shop_domain;
+    if (req.body?.domain) return req.body.domain;
+    return null;
   };
 
-  // Product create webhook
-  // Enqueue for async processing, respond immediately to Shopify
-  app.post("/api/webhooks/products/create", async (req: Request, res: Response) => {
-    try {
-      const secret = process.env.SHOPIFY_API_SECRET || "";
+  // Shared webhook handler with comprehensive logging
+  const handleWebhook = (
+    topic: string,
+    processor: (shop: string, payload: any) => Promise<void>,
+    options?: { useQueue?: boolean }
+  ) => {
+    return async (req: Request, res: Response) => {
+      const startTime = Date.now();
+      const webhookId = req.headers["x-shopify-webhook-id"] as string || "unknown";
+      const apiVersion = req.headers["x-shopify-api-version"] as string || "unknown";
 
-      if (!verifyWebhookSignature(req, secret)) {
-        console.log("[webhook] Invalid signature for products/create");
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
+      console.log(`[webhook] ========================================`);
+      console.log(`[webhook] RECEIVED: ${topic}`);
+      console.log(`[webhook] Webhook ID: ${webhookId}`);
+      console.log(`[webhook] API Version: ${apiVersion}`);
+      console.log(`[webhook] Timestamp: ${new Date().toISOString()}`);
 
-      const shop = getShopFromPayload(req.body);
-      if (!shop) {
-        console.log("[webhook] Could not determine shop from products/create payload");
-        res.status(400).json({ error: "Missing shop in payload" });
-        return;
-      }
-
-      logWebhookEvent("products/create", shop, req.body);
-      
-      // Enqueue webhook for async processing instead of processing inline
-      const enqueued = await enqueueWebhook("products/create", shop, req.body);
-      
-      if (!enqueued) {
-        console.warn("[webhook] Failed to enqueue products/create webhook, processing inline as fallback");
-        // Fallback: process inline if queue fails (but still respond quickly)
-      }
-
-      // Respond to Shopify immediately (within 5 seconds)
-      // Shopify will retry if we don't respond in time
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error("[webhook] Error handling products/create:", error);
-      // Still return 200 so Shopify doesn't retry - error is logged
-      res.status(200).json({ success: true });
-    }
-  });
-
-  // Product update webhook
-  // Enqueue for async processing, respond immediately to Shopify
-  app.post("/api/webhooks/products/update", async (req: Request, res: Response) => {
-    try {
-      const secret = process.env.SHOPIFY_API_SECRET || "";
-
-      if (!verifyWebhookSignature(req, secret)) {
-        console.log("[webhook] Invalid signature for products/update");
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
-
-      const shop = getShopFromPayload(req.body);
-      if (!shop) {
-        console.log("[webhook] Could not determine shop from products/update payload");
-        res.status(400).json({ error: "Missing shop in payload" });
-        return;
-      }
-
-      logWebhookEvent("products/update", shop, req.body);
-      
-      // Enqueue webhook for async processing instead of processing inline
-      const enqueued = await enqueueWebhook("products/update", shop, req.body);
-      
-      if (!enqueued) {
-        console.warn("[webhook] Failed to enqueue products/update webhook, processing inline as fallback");
-      }
-
-      // Respond to Shopify immediately (within 5 seconds)
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error("[webhook] Error handling products/update:", error);
-      // Still return 200 so Shopify doesn't retry
-      res.status(200).json({ success: true });
-    }
-  });
-
-  // Inventory update webhook
-  // Enqueue for async processing, respond immediately to Shopify
-  app.post(
-    "/api/webhooks/inventory_levels/update",
-    async (req: Request, res: Response) => {
       try {
         const secret = process.env.SHOPIFY_API_SECRET || "";
+        if (!secret) {
+          console.error(`[webhook] ❌ SHOPIFY_API_SECRET env var is not set — cannot verify webhook`);
+        }
+
+        const hasRawBody = !!(req as any).rawBody;
+        console.log(`[webhook] Raw body available: ${hasRawBody}`);
+        console.log(`[webhook] HMAC header present: ${!!req.headers["x-shopify-hmac-sha256"]}`);
 
         if (!verifyWebhookSignature(req, secret)) {
-          console.log("[webhook] Invalid signature for inventory_levels/update");
+          console.error(`[webhook] ❌ SIGNATURE VERIFICATION FAILED for ${topic}`);
+          console.error(`[webhook] Secret length: ${secret.length} chars`);
           res.status(401).json({ error: "Unauthorized" });
           return;
         }
 
-        const shop = getShopFromPayload(req.body);
+        console.log(`[webhook] ✅ Signature verified for ${topic}`);
+
+        const shop = getShopFromWebhookRequest(req);
         if (!shop) {
-          console.log("[webhook] Could not determine shop from inventory payload");
-          res.status(400).json({ error: "Missing shop in payload" });
+          console.error(`[webhook] ❌ COULD NOT DETERMINE SHOP for ${topic}`);
+          console.error(`[webhook] Headers: x-shopify-shop-domain=${req.headers["x-shopify-shop-domain"]}`);
+          console.error(`[webhook] Body keys: ${Object.keys(req.body || {}).join(", ")}`);
+          res.status(400).json({ error: "Missing shop" });
           return;
         }
 
-        logWebhookEvent("inventory_levels/update", shop, req.body);
-        
-        // Enqueue webhook for async processing instead of processing inline
-        const enqueued = await enqueueWebhook("inventory_levels/update", shop, req.body);
-        
-        if (!enqueued) {
-          console.warn("[webhook] Failed to enqueue inventory webhook, processing inline as fallback");
+        console.log(`[webhook] Shop: ${shop}`);
+        logWebhookEvent(topic, shop, req.body);
+
+        if (options?.useQueue) {
+          const enqueued = await enqueueWebhook(topic, shop, req.body);
+          if (enqueued) {
+            console.log(`[webhook] ✅ Enqueued ${topic} for async processing`);
+          } else {
+            console.warn(`[webhook] ⚠️ Queue unavailable, processing ${topic} inline`);
+            await processor(shop, req.body);
+            console.log(`[webhook] ✅ Processed ${topic} inline`);
+          }
+        } else {
+          await processor(shop, req.body);
+          console.log(`[webhook] ✅ Processed ${topic} successfully`);
         }
 
-        // Respond to Shopify immediately (within 5 seconds)
+        const duration = Date.now() - startTime;
+        console.log(`[webhook] ✅ COMPLETED: ${topic} for ${shop} in ${duration}ms`);
+        console.log(`[webhook] ========================================`);
         res.status(200).json({ success: true });
       } catch (error) {
-        console.error("[webhook] Error handling inventory_levels/update:", error);
-        // Still return 200 so Shopify doesn't retry
+        const duration = Date.now() - startTime;
+        console.error(`[webhook] ❌ ERROR handling ${topic} after ${duration}ms:`, error);
+        console.log(`[webhook] ========================================`);
         res.status(200).json({ success: true });
       }
-    }
+    };
+  };
+
+  // Product webhooks (enqueued for async processing)
+  app.post(
+    "/api/webhooks/products/create",
+    handleWebhook("products/create", async (shop, payload) => {
+      const { processProductCreate } = await import("./webhook-processors");
+      await processProductCreate(shop, payload);
+    }, { useQueue: true })
   );
 
-  // App uninstalled webhook — delete all shop data
-  app.post("/api/webhooks/app/uninstalled", async (req: Request, res: Response) => {
-    try {
-      const secret = process.env.SHOPIFY_API_SECRET || "";
+  app.post(
+    "/api/webhooks/products/update",
+    handleWebhook("products/update", async (shop, payload) => {
+      const { processProductUpdate } = await import("./webhook-processors");
+      await processProductUpdate(shop, payload);
+    }, { useQueue: true })
+  );
 
-      if (!verifyWebhookSignature(req, secret)) {
-        console.log("[webhook] Invalid signature for app/uninstalled");
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
+  app.post(
+    "/api/webhooks/inventory_levels/update",
+    handleWebhook("inventory_levels/update", async (shop, payload) => {
+      const { processInventoryUpdate } = await import("./webhook-processors");
+      await processInventoryUpdate(shop, payload);
+    }, { useQueue: true })
+  );
 
-      const shopDomain = req.headers["x-shopify-shop-domain"] as string;
-      if (!shopDomain) {
-        console.log("[webhook] Missing shop domain header for app/uninstalled");
-        res.status(400).json({ error: "Missing shop domain" });
-        return;
-      }
-
-      logWebhookEvent("app/uninstalled", shopDomain, req.body);
-
+  // App uninstalled — delete all shop data
+  app.post(
+    "/api/webhooks/app/uninstalled",
+    handleWebhook("app/uninstalled", async (shop, payload) => {
       const { processAppUninstalled } = await import("./webhook-processors");
-      await processAppUninstalled(shopDomain, req.body);
-
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error("[webhook] Error handling app/uninstalled:", error);
-      res.status(200).json({ success: true });
-    }
-  });
+      await processAppUninstalled(shop, payload);
+    })
+  );
 
   // GDPR mandatory webhooks
-  app.post("/api/webhooks/customers/data_request", async (req: Request, res: Response) => {
-    try {
-      const secret = process.env.SHOPIFY_API_SECRET || "";
-
-      if (!verifyWebhookSignature(req, secret)) {
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
-
-      const shopDomain = req.headers["x-shopify-shop-domain"] as string || "unknown";
-      logWebhookEvent("customers/data_request", shopDomain, req.body);
-
+  app.post(
+    "/api/webhooks/customers/data_request",
+    handleWebhook("customers/data_request", async (shop, payload) => {
       const { processCustomersDataRequest } = await import("./webhook-processors");
-      await processCustomersDataRequest(shopDomain, req.body);
+      await processCustomersDataRequest(shop, payload);
+    })
+  );
 
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error("[webhook] Error handling customers/data_request:", error);
-      res.status(200).json({ success: true });
-    }
-  });
-
-  app.post("/api/webhooks/customers/redact", async (req: Request, res: Response) => {
-    try {
-      const secret = process.env.SHOPIFY_API_SECRET || "";
-
-      if (!verifyWebhookSignature(req, secret)) {
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
-
-      const shopDomain = req.headers["x-shopify-shop-domain"] as string || "unknown";
-      logWebhookEvent("customers/redact", shopDomain, req.body);
-
+  app.post(
+    "/api/webhooks/customers/redact",
+    handleWebhook("customers/redact", async (shop, payload) => {
       const { processCustomersRedact } = await import("./webhook-processors");
-      await processCustomersRedact(shopDomain, req.body);
+      await processCustomersRedact(shop, payload);
+    })
+  );
 
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error("[webhook] Error handling customers/redact:", error);
-      res.status(200).json({ success: true });
-    }
-  });
-
-  app.post("/api/webhooks/shop/redact", async (req: Request, res: Response) => {
-    try {
-      const secret = process.env.SHOPIFY_API_SECRET || "";
-
-      if (!verifyWebhookSignature(req, secret)) {
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
-
-      const shopDomain = req.headers["x-shopify-shop-domain"] as string || "unknown";
-      logWebhookEvent("shop/redact", shopDomain, req.body);
-
+  app.post(
+    "/api/webhooks/shop/redact",
+    handleWebhook("shop/redact", async (shop, payload) => {
       const { processShopRedact } = await import("./webhook-processors");
-      await processShopRedact(shopDomain, req.body);
-
-      res.status(200).json({ success: true });
-    } catch (error) {
-      console.error("[webhook] Error handling shop/redact:", error);
-      res.status(200).json({ success: true });
-    }
-  });
+      await processShopRedact(shop, payload);
+    })
+  );
 
   // Admin endpoint: manually clean up data for a shop (e.g., after failed uninstall webhook)
   app.delete("/api/admin/shop-data", async (req: Request, res: Response) => {
