@@ -39,14 +39,21 @@ export default function App() {
 
   useEffect(() => {
     const shopParam = searchParams.get("shop");
+    const hostParam = searchParams.get("host");
 
     if (shopParam) {
       setShop(shopParam);
+
+      if (hostParam) {
+        checkOnboardingStatus(shopParam);
+        return;
+      }
+
       checkInstalled(shopParam);
     } else {
       setLoading(false);
     }
-  }, [searchParams]);
+  }, [searchParams, checkOnboardingStatus]);
 
   const checkInstalled = async (shopDomain: string) => {
     try {
