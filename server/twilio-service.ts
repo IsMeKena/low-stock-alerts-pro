@@ -10,16 +10,19 @@ export interface TwilioConfig {
 }
 
 let twilioClient: any = null;
+let twilioFromNumber: string = "";
 
 /**
  * Initialize Twilio client
  */
 export function initTwilio(config: TwilioConfig): void {
   try {
-    // Lazy load Twilio only when needed
     const twilio = require("twilio");
     twilioClient = twilio(config.accountSid, config.authToken);
+    twilioFromNumber = config.whatsappFrom;
     console.log("[twilio] Twilio client initialized");
+    console.log(`[twilio] Account SID: ${config.accountSid.substring(0, 8)}...`);
+    console.log(`[twilio] WhatsApp FROM number: "${config.whatsappFrom}"`);
   } catch (error) {
     console.warn("[twilio] Twilio SDK not installed. WhatsApp alerts will be simulated.");
   }
@@ -90,10 +93,11 @@ export async function sendWhatsAppMessage(
       };
     }
 
-    // Validate the FROM number
-    const fromNumber = process.env.TWILIO_WHATSAPP_FROM || "";
-    if (!fromNumber || !validateWhatsAppNumber(fromNumber)) {
+    // Use stored from number (from initTwilio) or fall back to env var
+    const fromNumber = twilioFromNumber || process.env.TWILIO_WHATSAPP_FROM || "";
+    if (!fromNumber || fromNumber.length < 5) {
       console.error(`[twilio] TWILIO_WHATSAPP_FROM is not set or invalid: "${fromNumber}"`);
+      console.error(`[twilio] twilioFromNumber="${twilioFromNumber}", env="${process.env.TWILIO_WHATSAPP_FROM}"`);
       return {
         success: false,
         error: `TWILIO_WHATSAPP_FROM environment variable is not set or invalid. Current value: "${fromNumber}". Set it to your Twilio WhatsApp-enabled number (e.g., +14155238886).`,
