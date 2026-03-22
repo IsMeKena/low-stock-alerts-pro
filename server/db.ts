@@ -125,6 +125,8 @@ async function ensureTables() {
         email_alerts_enabled boolean DEFAULT true,
         is_onboarded boolean DEFAULT false,
         dismissed_upsell_banner boolean DEFAULT false,
+        access_token text,
+        webhooks_registered boolean DEFAULT false,
         created_at timestamp DEFAULT now() NOT NULL,
         updated_at timestamp DEFAULT now() NOT NULL,
         CONSTRAINT shop_settings_shop_domain_unique UNIQUE(shop_domain)
@@ -132,6 +134,11 @@ async function ensureTables() {
     `;
 
     await client.query(createTablesSQL);
+
+    await client.query(`
+      ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS access_token text;
+      ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS webhooks_registered boolean DEFAULT false;
+    `);
     console.log("[db] ✅ All tables ready");
     return true;
   } catch (error) {

@@ -104,6 +104,21 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
         const alertsData = await alertsRes.json();
         setAlerts(alertsData.alerts || []);
       }
+
+      authenticatedFetch(`/api/webhooks/ensure`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shop }),
+      })
+        .then(async (r) => {
+          if (r.ok) {
+            const data = await r.json();
+            if (data.action === "registered") {
+              console.log("[dashboard] Webhooks auto-registered:", data.missingTopics);
+            }
+          }
+        })
+        .catch((err) => console.warn("[dashboard] Webhook ensure check failed:", err));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dashboard");
     } finally {

@@ -132,6 +132,8 @@ export const shopSettings = pgTable("shop_settings", {
   // Onboarding & upsell
   isOnboarded: boolean("is_onboarded").default(false),
   dismissedUpsellBanner: boolean("dismissed_upsell_banner").default(false),
+  accessToken: text("access_token"),
+  webhooksRegistered: boolean("webhooks_registered").default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -6,6 +6,7 @@ import {
   handleOAuthSession,
   isShopInstalled,
   verifySessionToken as verifyToken,
+  getAccessToken,
 } from "./auth-utils";
 import {
   verifyWebhookSignature,
@@ -116,6 +117,14 @@ export async function registerRoutes(
       );
       if (webhooksRegistered) {
         console.log(`[auth] Webhooks registered for ${result.shop}`);
+        const { db: database } = await import("./db");
+        const { shopSettings: settingsTable } = await import("@shared/schema.ts");
+        const { eq } = await import("drizzle-orm");
+        await database
+          .update(settingsTable)
+          .set({ webhooksRegistered: true, updatedAt: new Date() })
+          .where(eq(settingsTable.shopDomain, result.shop))
+          .catch((e: any) => console.warn("[auth] Could not update webhooksRegistered flag:", e));
       } else {
         console.warn(`[auth] Failed to register some webhooks for ${result.shop}`);
       }
@@ -652,7 +661,235 @@ export async function registerRoutes(
     }
   });
 
-  console.log("[routes] Auth, shop, and webhook routes registered");
+  // ============================================
+  // Webhook health check & self-healing
+  // ============================================
+
+  app.get("/api/webhooks/status", async (req: Request, res: Response) => {
+    try {
+      const shop = req.query.shop as string;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+
+      const sanitizedShop = shopify.utils.sanitizeShop(shop);
+      if (!sanitizedShop) {
+        return res.status(400).json({ error: "Invalid shop domain" });
+      }
+
+      const accessToken = await getAccessToken(sanitizedShop);
+      if (!accessToken) {
+        return res.json({
+          registered: false,
+          webhooks: [],
+          reason: "no_access_token",
+          message: "No access token available. Please reinstall the app.",
+        });
+      }
+
+      try {
+        const client = new shopify.clients.Rest({
+          session: {
+            shop: sanitizedShop,
+            accessToken,
+            scope: "",
+            state: "",
+            isOnline: false,
+            id: `offline_${sanitizedShop}`,
+            expires: undefined,
+          } as any,
+        });
+
+        const response = await client.get({ path: "webhooks" });
+        const webhooks = (response?.body as any)?.webhooks || [];
+
+        const requiredTopics = [
+          "inventory_levels/update",
+          "products/create",
+          "products/update",
+          "app/uninstalled",
+        ];
+
+        const registeredTopics = webhooks.map((w: any) => w.topic);
+        const missingTopics = requiredTopics.filter(
+          (t) => !registeredTopics.includes(t)
+        );
+
+        console.log(
+          `[webhook] Status check for ${sanitizedShop}: ${webhooks.length} registered, ${missingTopics.length} missing`
+        );
+
+        res.json({
+          registered: missingTopics.length === 0,
+          webhooks: webhooks.map((w: any) => ({
+            id: w.id,
+            topic: w.topic,
+            address: w.address,
+          })),
+          missingTopics,
+          total: webhooks.length,
+        });
+      } catch (apiError: any) {
+        console.error(`[webhook] Error checking webhook status:`, apiError?.message);
+        res.json({
+          registered: false,
+          webhooks: [],
+          reason: "api_error",
+          message: apiError?.message || "Failed to check webhooks",
+        });
+      }
+    } catch (error) {
+      console.error("[webhook] Status check error:", error);
+      res.status(500).json({ error: "Failed to check webhook status" });
+    }
+  });
+
+  app.post("/api/webhooks/register", async (req: Request, res: Response) => {
+    try {
+      const shop = (req.body.shop || req.query.shop) as string;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+
+      const sanitizedShop = shopify.utils.sanitizeShop(shop);
+      if (!sanitizedShop) {
+        return res.status(400).json({ error: "Invalid shop domain" });
+      }
+
+      const accessToken = await getAccessToken(sanitizedShop);
+      if (!accessToken) {
+        return res.status(400).json({
+          success: false,
+          error: "No access token found. Please reinstall the app from Shopify admin.",
+        });
+      }
+
+      console.log(`[webhook] Manual registration triggered for ${sanitizedShop}`);
+
+      const result = await registerWebhooks(sanitizedShop, accessToken);
+
+      if (result) {
+        const { db: database } = await import("./db");
+        const { shopSettings: settingsTable } = await import("@shared/schema.ts");
+        const { eq } = await import("drizzle-orm");
+
+        await database
+          .update(settingsTable)
+          .set({ webhooksRegistered: true, updatedAt: new Date() })
+          .where(eq(settingsTable.shopDomain, sanitizedShop));
+      }
+
+      res.json({
+        success: result,
+        message: result
+          ? "Webhooks registered successfully"
+          : "Some webhooks failed to register",
+      });
+    } catch (error) {
+      console.error("[webhook] Manual registration error:", error);
+      res.status(500).json({ error: "Failed to register webhooks" });
+    }
+  });
+
+  app.post("/api/webhooks/ensure", async (req: Request, res: Response) => {
+    try {
+      const shop = (req.body.shop || req.query.shop) as string;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
+
+      const sanitizedShop = shopify.utils.sanitizeShop(shop);
+      if (!sanitizedShop) {
+        return res.status(400).json({ error: "Invalid shop domain" });
+      }
+
+      const accessToken = await getAccessToken(sanitizedShop);
+      if (!accessToken) {
+        console.log(`[webhook] No access token for ${sanitizedShop}, skipping ensure`);
+        return res.json({
+          success: false,
+          action: "skipped",
+          reason: "no_access_token",
+        });
+      }
+
+      try {
+        const client = new shopify.clients.Rest({
+          session: {
+            shop: sanitizedShop,
+            accessToken,
+            scope: "",
+            state: "",
+            isOnline: false,
+            id: `offline_${sanitizedShop}`,
+            expires: undefined,
+          } as any,
+        });
+
+        const response = await client.get({ path: "webhooks" });
+        const webhooks = (response?.body as any)?.webhooks || [];
+        const registeredTopics = webhooks.map((w: any) => w.topic);
+
+        const requiredTopics = [
+          "inventory_levels/update",
+          "products/create",
+          "products/update",
+          "app/uninstalled",
+          "customers/data_request",
+          "customers/redact",
+          "shop/redact",
+        ];
+
+        const missingTopics = requiredTopics.filter(
+          (t) => !registeredTopics.includes(t)
+        );
+
+        if (missingTopics.length === 0) {
+          console.log(`[webhook] All webhooks already registered for ${sanitizedShop}`);
+          return res.json({
+            success: true,
+            action: "already_registered",
+            total: webhooks.length,
+          });
+        }
+
+        console.log(
+          `[webhook] Auto-healing: ${missingTopics.length} missing webhooks for ${sanitizedShop}, registering...`
+        );
+
+        const result = await registerWebhooks(sanitizedShop, accessToken);
+
+        if (result) {
+          const { db: database } = await import("./db");
+          const { shopSettings: settingsTable } = await import("@shared/schema.ts");
+          const { eq } = await import("drizzle-orm");
+
+          await database
+            .update(settingsTable)
+            .set({ webhooksRegistered: true, updatedAt: new Date() })
+            .where(eq(settingsTable.shopDomain, sanitizedShop));
+        }
+
+        res.json({
+          success: result,
+          action: "registered",
+          missingTopics,
+        });
+      } catch (apiError: any) {
+        console.error(`[webhook] Ensure check failed:`, apiError?.message);
+        res.json({
+          success: false,
+          action: "error",
+          reason: apiError?.message,
+        });
+      }
+    } catch (error) {
+      console.error("[webhook] Ensure error:", error);
+      res.status(500).json({ error: "Failed to ensure webhooks" });
+    }
+  });
+
+  console.log("[routes] Auth, shop, webhook, and webhook-health routes registered");
 
   // Register billing and onboarding routes
   try {
