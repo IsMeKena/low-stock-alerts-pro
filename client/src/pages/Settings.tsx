@@ -19,6 +19,8 @@ import {
   SkeletonDisplayText,
   Icon,
   Badge,
+  Button,
+  Box,
 } from "@shopify/polaris";
 import {
   NotificationIcon,
@@ -231,10 +233,17 @@ export default function Settings({ shop }: SettingsProps) {
                     {settings.plan.toUpperCase()}
                   </Badge>
                 </InlineStack>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  To change your plan, visit the app listing in your Shopify
-                  admin under Apps.
-                </Text>
+                {settings.plan !== "premium" && (
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Upgrade to unlock more alerts, WhatsApp notifications, and
+                    priority support.
+                  </Text>
+                )}
+                <InlineStack gap="300">
+                  <Button onClick={() => navigate("/billing")}>
+                    {settings.plan === "premium" ? "View plan details" : "View plans & upgrade"}
+                  </Button>
+                </InlineStack>
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
@@ -336,9 +345,16 @@ export default function Settings({ shop }: SettingsProps) {
                   />
 
                   {settings.plan !== "premium" && (
-                    <Banner tone="info">
+                    <Banner
+                      tone="info"
+                      action={{
+                        content: "Upgrade to Premium",
+                        onAction: () => navigate("/billing"),
+                      }}
+                    >
                       <p>
                         WhatsApp notifications are available on the Premium plan.
+                        Upgrade to receive instant alerts on WhatsApp.
                       </p>
                     </Banner>
                   )}
@@ -402,6 +418,10 @@ export default function Settings({ shop }: SettingsProps) {
               </BlockStack>
             </Card>
           </Layout.AnnotatedSection>
+
+          <Layout.Section>
+            <Box paddingBlockEnd="800" />
+          </Layout.Section>
         </Layout>
       </Page>
 
