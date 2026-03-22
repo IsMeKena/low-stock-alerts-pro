@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Banner, BlockStack, Text } from "@shopify/polaris";
+import { Banner, Text, BlockStack } from "@shopify/polaris";
 
 interface UpsellBannerProps {
   userPlan: string;
@@ -16,19 +16,17 @@ export function UpsellBanner({
 }: UpsellBannerProps) {
   const [dismissed, setDismissed] = useState(false);
 
-  // Only show if: WhatsApp selected AND plan is Free or Pro (NOT Premium)
   if (
     dismissed ||
     !selectedWhatsApp ||
-    userPlan === "premium" ||
-    userPlan === "Premium"
+    userPlan.toLowerCase() === "premium"
   ) {
     return null;
   }
 
   return (
     <Banner
-      title="🚀 Unlock WhatsApp Notifications"
+      title="Unlock WhatsApp notifications"
       tone="info"
       action={{
         content: "Upgrade to Premium",
@@ -36,14 +34,13 @@ export function UpsellBanner({
       }}
       onDismiss={() => {
         setDismissed(true);
-        localStorage.setItem("dismissedUpsellBanner", "true");
         onDismiss?.();
       }}
     >
       <BlockStack gap="100">
         <Text as="p">
           You selected WhatsApp alerts, but this feature is only available on
-          our Premium plan.
+          the Premium plan.
         </Text>
         <Text as="p" variant="bodySm">
           Upgrade now to get WhatsApp notifications for all your products.

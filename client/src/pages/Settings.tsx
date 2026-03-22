@@ -1,19 +1,37 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
-  Card,
+  Page,
   Layout,
-  Button,
+  Card,
   TextField,
   Select,
   Checkbox,
   Text,
-  Box,
   BlockStack,
   InlineStack,
   Banner,
-  Form,
   FormLayout,
+  ContextualSaveBar,
+  Toast,
+  Frame,
+  SkeletonPage,
+  SkeletonBodyText,
+  SkeletonDisplayText,
+  Icon,
+  Badge,
 } from "@shopify/polaris";
+import {
+  NotificationIcon,
+  SettingsIcon,
+  ClockIcon,
+  AlertCircleIcon,
+} from "@shopify/polaris-icons";
+import { useNavigate } from "react-router-dom";
+import { authenticatedFetch } from "../utils/fetch";
+
+interface SettingsProps {
+  shop: string | null;
+}
 
 interface SettingsData {
   plan: "free" | "pro" | "premium";
@@ -26,311 +44,368 @@ interface SettingsData {
   batchingInterval: "hourly" | "daily" | "weekly";
 }
 
-export default function Settings() {
+export default function Settings({ shop }: SettingsProps) {
   const [settings, setSettings] = useState<SettingsData | null>(null);
+  const [savedSettings, setSavedSettings] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [toastActive, setToastActive] = useState(false);
+  const [toastContent, setToastContent] = useState("");
+  const [toastError, setToastError] = useState(false);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchSettings();
-  }, []);
-
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
+    if (!shop) return;
     try {
-      const params = new URLSearchParams(window.location.search);
-      const shop = params.get("shop");
-
-      const response = await fetch(`/api/settings?shop=${shop}`);
+      const response = await authenticatedFetch(`/api/settings?shop=${shop}`);
       if (!response.ok) throw new Error("Failed to fetch settings");
-
       const data = await response.json();
       setSettings(data.settings);
+      setSavedSettings(data.settings);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setLoading(false);
     }
-  };
+  }, [shop]);
+
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  const isDirty = useMemo(() => {
+    if (!settings || !savedSettings) return false;
+    return JSON.stringify(settings) !== JSON.stringify(savedSettings);
+  }, [settings, savedSettings]);
 
   const updateSetting = (key: keyof SettingsData, value: any) => {
     if (settings) {
       setSettings({ ...settings, [key]: value });
-      setSuccess(false);
     }
   };
 
   const handleSave = async () => {
-    if (!settings) return;
+    if (!settings || !shop) return;
     setSaving(true);
     setError(null);
-    setSuccess(false);
 
     try {
-      const params = new URLSearchParams(window.location.search);
-      const shop = params.get("shop");
-
-      const response = await fetch("/api/settings/update", {
+      const response = await authenticatedFetch("/api/settings/update", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shop,
-          ...settings,
-        }),
+        body: JSON.stringify({ shop, ...settings }),
       });
 
       if (!response.ok) {
         throw new Error("Failed to save settings");
       }
 
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), 3000);
+      setSavedSettings({ ...settings });
+      setToastContent("Settings saved");
+      setToastError(false);
+      setToastActive(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      setToastContent(err instanceof Error ? err.message : "Failed to save");
+      setToastError(true);
+      setToastActive(true);
     } finally {
       setSaving(false);
     }
   };
 
+  const handleDiscard = () => {
+    if (savedSettings) {
+      setSettings({ ...savedSettings });
+    }
+  };
+
   if (loading) {
     return (
-      <Box paddingBlockStart="400" paddingBlockEnd="400">
+      <SkeletonPage title="Settings" backAction>
         <Layout>
-          <Layout.Section>
+          <Layout.AnnotatedSection title="Alert thresholds">
             <Card>
-              <Text as="h2" variant="headingLg">
-                Loading...
-              </Text>
+              <SkeletonDisplayText size="small" />
+              <SkeletonBodyText lines={4} />
             </Card>
-          </Layout.Section>
+          </Layout.AnnotatedSection>
+          <Layout.AnnotatedSection title="Notifications">
+            <Card>
+              <SkeletonDisplayText size="small" />
+              <SkeletonBodyText lines={3} />
+            </Card>
+          </Layout.AnnotatedSection>
         </Layout>
-      </Box>
+      </SkeletonPage>
     );
   }
 
   if (!settings) {
     return (
-      <Box paddingBlockStart="400" paddingBlockEnd="400">
+      <Page
+        title="Settings"
+        backAction={{ content: "Dashboard", onAction: () => navigate("/") }}
+      >
         <Layout>
           <Layout.Section>
-            <Card>
-              <BlockStack gap="300">
-                <Text as="h2" variant="headingLg" tone="critical">
-                  Settings Not Found
-                </Text>
-                <Text as="p" variant="bodyMd">
-                  Please complete onboarding first.
-                </Text>
-                <Button onClick={() => (window.location.href = "/")}>
-                  Back to App
-                </Button>
-              </BlockStack>
-            </Card>
+            <Banner
+              title="Settings not found"
+              tone="warning"
+              action={{
+                content: "Complete onboarding",
+                onAction: () => navigate("/onboarding"),
+              }}
+            >
+              <p>Please complete onboarding to configure your settings.</p>
+            </Banner>
           </Layout.Section>
         </Layout>
-      </Box>
+      </Page>
     );
   }
 
+  const toastMarkup = toastActive ? (
+    <Toast
+      content={toastContent}
+      error={toastError}
+      onDismiss={() => setToastActive(false)}
+    />
+  ) : null;
+
+  const contextualSaveBarMarkup = isDirty ? (
+    <ContextualSaveBar
+      message="Unsaved changes"
+      saveAction={{
+        onAction: handleSave,
+        loading: saving,
+        disabled: saving,
+      }}
+      discardAction={{
+        onAction: handleDiscard,
+      }}
+    />
+  ) : null;
+
   return (
-    <Box paddingBlockStart="400" paddingBlockEnd="400">
-      <Layout>
-        {/* Header */}
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="100">
-              <Text as="h1" variant="headingLg">
-                ⚙️ Settings
-              </Text>
-              <Text as="p" variant="bodyMd" tone="subdued">
-                Manage your Low Stock Alerts configuration
-              </Text>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+    <>
+      {contextualSaveBarMarkup}
 
-        {/* Alerts */}
-        {error && (
-          <Layout.Section>
-            <Banner tone="critical">
-              <Text as="p">{error}</Text>
-            </Banner>
-          </Layout.Section>
-        )}
+      <Page
+        title="Settings"
+        backAction={{ content: "Dashboard", onAction: () => navigate("/") }}
+      >
+        <Layout>
+          {error && (
+            <Layout.Section>
+              <Banner
+                title="Error"
+                tone="critical"
+                onDismiss={() => setError(null)}
+              >
+                <p>{error}</p>
+              </Banner>
+            </Layout.Section>
+          )}
 
-        {success && (
-          <Layout.Section>
-            <Banner tone="success">
-              <Text as="p">✓ Settings saved successfully!</Text>
-            </Banner>
-          </Layout.Section>
-        )}
-
-        {/* Settings Form */}
-        <Layout.Section>
-          <Form onSubmit={handleSave}>
-            <BlockStack gap="600">
-              {/* Plan Section */}
-              <Card>
-                <BlockStack gap="300">
+          <Layout.AnnotatedSection
+            title="Current plan"
+            description="Your plan determines how many alerts you can send each month."
+          >
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
                   <Text as="h3" variant="headingMd">
-                    📋 Plan
+                    {settings.plan.charAt(0).toUpperCase() +
+                      settings.plan.slice(1)}{" "}
+                    plan
                   </Text>
-                  <FormLayout>
-                    <Select
-                      label="Current Plan"
-                      options={[
-                        { label: "Free - $0/month", value: "free" },
-                        { label: "Pro - $5/month", value: "pro" },
-                        { label: "Premium - $12/month", value: "premium" },
-                      ]}
-                      value={settings.plan}
-                      onChange={(value) => updateSetting("plan", value)}
-                    />
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Upgrade or downgrade your plan anytime. Changes take effect at the next billing cycle.
-                    </Text>
-                  </FormLayout>
-                </BlockStack>
-              </Card>
+                  <Badge
+                    tone={
+                      settings.plan === "premium"
+                        ? "success"
+                        : settings.plan === "pro"
+                          ? "attention"
+                          : "info"
+                    }
+                  >
+                    {settings.plan.toUpperCase()}
+                  </Badge>
+                </InlineStack>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  To change your plan, visit the app listing in your Shopify
+                  admin under Apps.
+                </Text>
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
 
-              {/* Threshold Settings */}
-              <Card>
-                <BlockStack gap="300">
+          <Layout.AnnotatedSection
+            title="Alert thresholds"
+            description="Configure when low stock alerts should trigger for your products."
+          >
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack gap="200" blockAlign="center">
+                  <Icon source={AlertCircleIcon} tone="base" />
                   <Text as="h3" variant="headingMd">
-                    🎯 Alert Thresholds
+                    Threshold configuration
                   </Text>
-                  <FormLayout>
-                    <Select
-                      label="Threshold Type"
-                      options={[
-                        { label: "Quantity (units)", value: "quantity" },
-                        { label: "Percentage (%)", value: "percentage" },
-                      ]}
-                      value={settings.thresholdType}
-                      onChange={(value) => updateSetting("thresholdType", value as "quantity" | "percentage")}
-                    />
+                </InlineStack>
+                <FormLayout>
+                  <Select
+                    label="Threshold type"
+                    options={[
+                      { label: "Quantity (units)", value: "quantity" },
+                      { label: "Percentage (%)", value: "percentage" },
+                    ]}
+                    value={settings.thresholdType}
+                    onChange={(value) =>
+                      updateSetting(
+                        "thresholdType",
+                        value as "quantity" | "percentage"
+                      )
+                    }
+                  />
 
+                  <TextField
+                    label={
+                      settings.thresholdType === "quantity"
+                        ? "Alert when quantity falls below"
+                        : "Alert when at less than (%)"
+                    }
+                    type="number"
+                    value={String(settings.thresholdValue)}
+                    onChange={(val) =>
+                      updateSetting("thresholdValue", parseInt(val))
+                    }
+                    autoComplete="off"
+                    suffix={
+                      settings.thresholdType === "quantity" ? "units" : "%"
+                    }
+                  />
+
+                  {settings.thresholdType === "percentage" && (
                     <TextField
-                      label={
-                        settings.thresholdType === "quantity"
-                          ? "Alert when quantity falls below:"
-                          : "Alert when at less than (%):"
-                      }
+                      label="Safety stock level"
                       type="number"
-                      value={String(settings.thresholdValue)}
-                      onChange={(val) => updateSetting("thresholdValue", parseInt(val))}
+                      value={String(settings.safetyStock)}
+                      onChange={(val) =>
+                        updateSetting("safetyStock", parseInt(val))
+                      }
                       autoComplete="off"
+                      suffix="units"
+                      helpText={`Alert triggers when stock drops below ${settings.thresholdValue}% of ${settings.safetyStock} = ${Math.floor((settings.thresholdValue / 100) * settings.safetyStock)} units`}
                     />
+                  )}
+                </FormLayout>
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
 
-                    {settings.thresholdType === "percentage" && (
-                      <TextField
-                        label="Safety Stock Level"
-                        type="number"
-                        value={String(settings.safetyStock)}
-                        onChange={(val) => updateSetting("safetyStock", parseInt(val))}
-                        autoComplete="off"
-                        helpText={`Alert triggers when stock < ${settings.thresholdValue}% of ${settings.safetyStock} = ${Math.floor((settings.thresholdValue / 100) * settings.safetyStock)} units`}
-                      />
-                    )}
-                  </FormLayout>
-                </BlockStack>
-              </Card>
-
-              {/* Notification Settings */}
-              <Card>
-                <BlockStack gap="300">
+          <Layout.AnnotatedSection
+            title="Notifications"
+            description="Choose how and where you receive low stock alerts."
+          >
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack gap="200" blockAlign="center">
+                  <Icon source={NotificationIcon} tone="base" />
                   <Text as="h3" variant="headingMd">
-                    📬 Notifications
+                    Notification channels
                   </Text>
-                  <FormLayout>
+                </InlineStack>
+                <FormLayout>
+                  <Select
+                    label="Notification method"
+                    options={[
+                      { label: "Email", value: "email" },
+                      ...(settings.plan === "premium"
+                        ? [
+                            { label: "WhatsApp", value: "whatsapp" },
+                            { label: "Email + WhatsApp", value: "both" },
+                          ]
+                        : []),
+                    ]}
+                    value={settings.notificationMethod}
+                    onChange={(value) =>
+                      updateSetting(
+                        "notificationMethod",
+                        value as "email" | "whatsapp" | "both"
+                      )
+                    }
+                  />
+
+                  {settings.plan !== "premium" && (
+                    <Banner tone="info">
+                      <p>
+                        WhatsApp notifications are available on the Premium plan.
+                      </p>
+                    </Banner>
+                  )}
+
+                  {settings.notificationMethod !== "email" && (
+                    <TextField
+                      label="WhatsApp number"
+                      type="tel"
+                      placeholder="+1234567890"
+                      value={settings.whatsappNumber}
+                      onChange={(val) => updateSetting("whatsappNumber", val)}
+                      autoComplete="tel"
+                      helpText="Format: +[country code][number]"
+                    />
+                  )}
+                </FormLayout>
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+
+          <Layout.AnnotatedSection
+            title="Alert batching"
+            description="Combine multiple alerts into periodic digest messages instead of sending them individually."
+          >
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack gap="200" blockAlign="center">
+                  <Icon source={ClockIcon} tone="base" />
+                  <Text as="h3" variant="headingMd">
+                    Digest settings
+                  </Text>
+                </InlineStack>
+                <FormLayout>
+                  <Checkbox
+                    label="Enable alert batching (digest mode)"
+                    checked={settings.batchingEnabled}
+                    onChange={(checked) =>
+                      updateSetting("batchingEnabled", checked)
+                    }
+                    helpText="Combine multiple alerts into periodic digests instead of individual messages"
+                  />
+
+                  {settings.batchingEnabled && (
                     <Select
-                      label="Notification Method"
+                      label="Batching interval"
                       options={[
-                        { label: "Email", value: "email" },
-                        ...(settings.plan !== "pro"
-                          ? [
-                              { label: "WhatsApp", value: "whatsapp" },
-                              { label: "Email + WhatsApp", value: "both" },
-                            ]
-                          : []),
+                        { label: "Hourly", value: "hourly" },
+                        { label: "Daily", value: "daily" },
+                        { label: "Weekly", value: "weekly" },
                       ]}
-                      value={settings.notificationMethod}
-                      onChange={(value) => updateSetting("notificationMethod", value as "email" | "whatsapp" | "both")}
+                      value={settings.batchingInterval}
+                      onChange={(value) =>
+                        updateSetting(
+                          "batchingInterval",
+                          value as "hourly" | "daily" | "weekly"
+                        )
+                      }
                     />
+                  )}
+                </FormLayout>
+              </BlockStack>
+            </Card>
+          </Layout.AnnotatedSection>
+        </Layout>
+      </Page>
 
-                    {settings.plan === "pro" && (
-                      <Banner tone="info">
-                        <Text as="p">WhatsApp is available on Premium plan only. Upgrade to enable WhatsApp notifications.</Text>
-                      </Banner>
-                    )}
-
-                    {settings.notificationMethod !== "email" && (
-                      <TextField
-                        label="WhatsApp Number"
-                        type="tel"
-                        placeholder="+1234567890"
-                        value={settings.whatsappNumber}
-                        onChange={(val) => updateSetting("whatsappNumber", val)}
-                        autoComplete="tel"
-                        helpText="Format: +[country code][number]"
-                      />
-                    )}
-                  </FormLayout>
-                </BlockStack>
-              </Card>
-
-              {/* Batching Settings */}
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingMd">
-                    📦 Alert Batching
-                  </Text>
-                  <FormLayout>
-                    <Checkbox
-                      label="Enable alert batching (digest mode)"
-                      checked={settings.batchingEnabled}
-                      onChange={(checked) => updateSetting("batchingEnabled", checked)}
-                      helpText="Combine multiple alerts into periodic digests instead of individual messages"
-                    />
-
-                    {settings.batchingEnabled && (
-                      <Select
-                        label="Batching Interval"
-                        options={[
-                          { label: "Hourly", value: "hourly" },
-                          { label: "Daily", value: "daily" },
-                          { label: "Weekly", value: "weekly" },
-                        ]}
-                        value={settings.batchingInterval}
-                        onChange={(value) => updateSetting("batchingInterval", value as "hourly" | "daily" | "weekly")}
-                      />
-                    )}
-                  </FormLayout>
-                </BlockStack>
-              </Card>
-
-              {/* Save Button */}
-              <InlineStack gap="200" align="end">
-                <Button
-                  onClick={() => window.history.back()}
-                  variant="secondary"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleSave}
-                  variant="primary"
-                  loading={saving}
-                >
-                  {saving ? "Saving..." : "Save Changes"}
-                </Button>
-              </InlineStack>
-            </BlockStack>
-          </Form>
-        </Layout.Section>
-      </Layout>
-    </Box>
+      {toastMarkup}
+    </>
   );
 }

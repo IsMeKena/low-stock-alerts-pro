@@ -1,0 +1,28 @@
+name = "Low Stock Alerts Pro"
+client_id = ""
+application_url = ""
+embedded = true
+
+[access_scopes]
+scopes = "read_products,read_inventory,write_products"
+
+[auth]
+redirect_urls = [
+  "https://localhost/api/auth/callback",
+]
+
+[webhooks]
+api_version = "2024-10"
+
+  [webhooks.subscriptions]
+
+  [[webhooks.subscriptions.compliance]]
+  topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "/api/webhooks/compliance"
+
+  [[webhooks.subscriptions.event]]
+  topics = ["products/create", "products/update", "inventory_levels/update"]
+  uri = "/api/webhooks"
+
+[pos]
+embedded = false

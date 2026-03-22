@@ -17,8 +17,6 @@
     "test:migrations:all": "npm run test:migrations:fresh && npm run test:migrations:idempotent && npm run test:migrations:data-safety"
   },
   "dependencies": {
-    "@shopify/app-bridge": "^3.7.11",
-    "@shopify/app-bridge-react": "^3.7.11",
     "@shopify/polaris": "^13.9.5",
     "@shopify/polaris-icons": "^9.3.1",
     "@shopify/shopify-api": "^12.3.0",
@@ -33,9 +31,9 @@
     "pg": "^8.16.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
     "redis": "^4.6.10",
     "twilio": "^4.19.0",
-    "wouter": "^3.3.5",
     "zod": "^3.24.2"
   },
   "devDependencies": {
