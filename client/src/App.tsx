@@ -14,6 +14,14 @@ export default function App() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
+  const redirectToAuth = useCallback(
+    (shopDomain: string) => {
+      const embedded = window.top !== window.self ? "&embedded=1" : "";
+      window.location.href = `/api/auth?shop=${shopDomain}${embedded}`;
+    },
+    []
+  );
+
   const checkOnboardingStatus = useCallback(
     async (shopDomain: string) => {
       try {
@@ -37,42 +45,38 @@ export default function App() {
     [navigate]
   );
 
+  const ensureInstalledThenOnboard = useCallback(
+    async (shopDomain: string) => {
+      try {
+        const response = await authenticatedFetch(
+          `/api/auth/installed?shop=${shopDomain}`
+        );
+        const data = await response.json();
+
+        if (data.installed) {
+          checkOnboardingStatus(shopDomain);
+        } else {
+          console.log("[app] Shop not installed, redirecting to OAuth");
+          redirectToAuth(shopDomain);
+        }
+      } catch {
+        console.log("[app] Install check failed, redirecting to OAuth");
+        redirectToAuth(shopDomain);
+      }
+    },
+    [checkOnboardingStatus, redirectToAuth]
+  );
+
   useEffect(() => {
     const shopParam = searchParams.get("shop");
-    const hostParam = searchParams.get("host");
 
     if (shopParam) {
       setShop(shopParam);
-
-      if (hostParam) {
-        checkOnboardingStatus(shopParam);
-        return;
-      }
-
-      checkInstalled(shopParam);
+      ensureInstalledThenOnboard(shopParam);
     } else {
       setLoading(false);
     }
-  }, [searchParams, checkOnboardingStatus]);
-
-  const checkInstalled = async (shopDomain: string) => {
-    try {
-      const response = await authenticatedFetch(
-        `/api/auth/installed?shop=${shopDomain}`
-      );
-      const data = await response.json();
-
-      if (data.installed) {
-        checkOnboardingStatus(shopDomain);
-      } else {
-        const embedded = window.top !== window.self ? "&embedded=1" : "";
-        window.location.href = `/api/auth?shop=${shopDomain}${embedded}`;
-      }
-    } catch {
-      const embedded = window.top !== window.self ? "&embedded=1" : "";
-      window.location.href = `/api/auth?shop=${shopDomain}${embedded}`;
-    }
-  };
+  }, [searchParams, ensureInstalledThenOnboard]);
 
   if (loading) {
     return (
