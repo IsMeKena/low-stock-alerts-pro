@@ -93,14 +93,14 @@ export async function sendWhatsAppMessage(
       };
     }
 
-    // Use stored from number (from initTwilio) or fall back to env var
-    const fromNumber = twilioFromNumber || process.env.TWILIO_WHATSAPP_FROM || "";
+    // Use stored from number (from initTwilio) or fall back to env vars
+    const fromNumber = twilioFromNumber || process.env.TWILIO_WHATSAPP_FROM || process.env.TWILIO_WHATSAPP_NUMBER || "";
     if (!fromNumber || fromNumber.length < 5) {
-      console.error(`[twilio] TWILIO_WHATSAPP_FROM is not set or invalid: "${fromNumber}"`);
-      console.error(`[twilio] twilioFromNumber="${twilioFromNumber}", env="${process.env.TWILIO_WHATSAPP_FROM}"`);
+      console.error(`[twilio] WhatsApp FROM number is not set or invalid: "${fromNumber}"`);
+      console.error(`[twilio] twilioFromNumber="${twilioFromNumber}", TWILIO_WHATSAPP_FROM="${process.env.TWILIO_WHATSAPP_FROM}", TWILIO_WHATSAPP_NUMBER="${process.env.TWILIO_WHATSAPP_NUMBER}"`);
       return {
         success: false,
-        error: `TWILIO_WHATSAPP_FROM environment variable is not set or invalid. Current value: "${fromNumber}". Set it to your Twilio WhatsApp-enabled number (e.g., +14155238886).`,
+        error: `WhatsApp FROM number is not configured. Set TWILIO_WHATSAPP_FROM or TWILIO_WHATSAPP_NUMBER env var to your Twilio WhatsApp number (e.g., +14155238886).`,
       };
     }
 
