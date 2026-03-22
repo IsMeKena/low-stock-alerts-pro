@@ -131,22 +131,86 @@ export async function registerRoutes(
     } catch (error: any) {
       const shop = req.query.shop as string;
       const host = req.query.host as string;
+      const code = req.query.code as string;
 
-      if (
+      const isCookieError =
         error.constructor?.name === "CookieNotFound" ||
-        error.message?.includes("Could not find an OAuth cookie")
-      ) {
-        if (shop) {
-          const sanitizedShop = shopify.utils.sanitizeShop(shop);
-          if (sanitizedShop) {
-            console.log(
-              `[auth] Cookie not found for ${sanitizedShop}, redirecting to app`
+        error.message?.includes("Could not find an OAuth cookie");
+
+      if (isCookieError && shop && code) {
+        const sanitizedShop = shopify.utils.sanitizeShop(shop);
+        if (sanitizedShop) {
+          console.log(
+            `[auth] Cookie not found for ${sanitizedShop}, attempting manual token exchange`
+          );
+
+          try {
+            const tokenResponse = await fetch(
+              `https://${sanitizedShop}/admin/oauth/access_token`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  client_id: process.env.SHOPIFY_API_KEY,
+                  client_secret: process.env.SHOPIFY_API_SECRET,
+                  code,
+                }),
+              }
             );
+
+            if (!tokenResponse.ok) {
+              const errText = await tokenResponse.text();
+              console.error(`[auth] Token exchange failed (${tokenResponse.status}):`, errText);
+              throw new Error(`Token exchange failed: ${tokenResponse.status}`);
+            }
+
+            const tokenData = await tokenResponse.json() as {
+              access_token: string;
+              scope: string;
+            };
+            console.log(`[auth] ✅ Manual token exchange successful for ${sanitizedShop}`);
+
+            const { Session } = await import("@shopify/shopify-api");
+            const manualSession = new Session({
+              id: `offline_${sanitizedShop}`,
+              shop: sanitizedShop,
+              state: "",
+              isOnline: false,
+            });
+            manualSession.accessToken = tokenData.access_token;
+            manualSession.scope = tokenData.scope;
+
+            const result = await handleOAuthSession(manualSession);
+
+            if (result.success) {
+              console.log(`[auth] Registering webhooks for ${result.shop}`);
+              const webhooksRegistered = await registerWebhooks(
+                result.shop,
+                result.accessToken || ""
+              );
+              console.log(
+                `[auth] Webhooks ${webhooksRegistered ? "registered" : "failed"} for ${result.shop}`
+              );
+
+              syncProducts(result.shop, result.accessToken || "")
+                .then(({ created, updated }) => {
+                  console.log(
+                    `[auth] Product sync complete: ${created} created, ${updated} updated`
+                  );
+                })
+                .catch((syncError) => {
+                  console.error(`[auth] Product sync failed:`, syncError);
+                });
+            }
+
             const redirectUrl = host
               ? `/?shop=${sanitizedShop}&host=${host}`
               : `/?shop=${sanitizedShop}`;
+            console.log(`[auth] Redirecting to ${redirectUrl}`);
             res.redirect(redirectUrl);
             return;
+          } catch (manualError) {
+            console.error("[auth] Manual token exchange failed:", manualError);
           }
         }
       }
