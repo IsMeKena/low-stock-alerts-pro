@@ -18,6 +18,9 @@ import {
   Box,
   Icon,
   Divider,
+  Button,
+  CalloutCard,
+  List,
 } from "@shopify/polaris";
 import {
   AlertCircleIcon,
@@ -25,6 +28,9 @@ import {
   ChatIcon,
   InventoryIcon,
   ChartVerticalFilledIcon,
+  CheckCircleIcon,
+  SettingsIcon,
+  NotificationIcon,
 } from "@shopify/polaris-icons";
 import { useNavigate } from "react-router-dom";
 import { UpsellBanner } from "../components/UpsellBanner";
@@ -124,6 +130,9 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
   const { selectedResources, allResourcesSelected, handleSelectionChange } =
     useIndexResourceState(alerts);
 
+  const currentPlan = billing?.plan || "free";
+  const isPremium = currentPlan === "premium";
+
   const getPlanBadge = (plan: string) => {
     const toneMap: Record<string, "success" | "attention" | "info"> = {
       free: "info",
@@ -145,19 +154,6 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
     );
   };
 
-  const getWhatsappProgress = (): number => {
-    if (
-      typeof billing?.whatsappLimit === "string" ||
-      billing?.whatsappLimit === 0 ||
-      !billing?.whatsappLimit
-    )
-      return 0;
-    return Math.min(
-      (billing.whatsappUsed / (billing.whatsappLimit as number)) * 100,
-      100
-    );
-  };
-
   if (loading) {
     return (
       <SkeletonPage title="Dashboard" primaryAction>
@@ -166,18 +162,6 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
             <Card>
               <SkeletonDisplayText size="small" />
               <SkeletonBodyText lines={2} />
-            </Card>
-          </Layout.Section>
-          <Layout.Section variant="oneHalf">
-            <Card>
-              <SkeletonDisplayText size="small" />
-              <SkeletonBodyText lines={3} />
-            </Card>
-          </Layout.Section>
-          <Layout.Section variant="oneHalf">
-            <Card>
-              <SkeletonDisplayText size="small" />
-              <SkeletonBodyText lines={3} />
             </Card>
           </Layout.Section>
           <Layout.Section>
@@ -236,6 +220,8 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
     </IndexTable.Row>
   ));
 
+  const hasAlerts = alerts.length > 0;
+
   return (
     <Page
       title="Dashboard"
@@ -244,29 +230,51 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
         content: "Settings",
         onAction: () => navigate("/settings"),
       }}
-      titleMetadata={billing ? getPlanBadge(billing.plan) : undefined}
+      secondaryActions={[
+        {
+          content: "Billing",
+          onAction: () => navigate("/billing"),
+        },
+      ]}
+      titleMetadata={billing ? getPlanBadge(currentPlan) : undefined}
     >
       <Layout>
         {shopSettings && (
           <Layout.Section>
             <UpsellBanner
-              userPlan={billing?.plan || "free"}
+              userPlan={currentPlan}
               selectedWhatsApp={
                 shopSettings.notificationMethod?.includes("whatsapp") || false
               }
-              onUpgrade={() => navigate("/settings")}
+              onUpgrade={() => navigate("/billing")}
               onDismiss={handleDismissBanner}
             />
+          </Layout.Section>
+        )}
+
+        {!hasAlerts && (
+          <Layout.Section>
+            <Banner tone="success" icon={CheckCircleIcon}>
+              <p>
+                Your inventory is being monitored. You'll receive alerts when
+                stock drops below your configured thresholds.
+              </p>
+            </Banner>
           </Layout.Section>
         )}
 
         <Layout.Section variant="oneHalf">
           <Card>
             <BlockStack gap="300">
-              <InlineStack gap="200" blockAlign="center">
-                <Icon source={EmailIcon} tone="base" />
-                <Text as="h3" variant="headingMd">
-                  Email usage
+              <InlineStack align="space-between" blockAlign="center">
+                <InlineStack gap="200" blockAlign="center">
+                  <Icon source={EmailIcon} tone="base" />
+                  <Text as="h3" variant="headingMd">
+                    Email alerts
+                  </Text>
+                </InlineStack>
+                <Text as="span" variant="bodySm" tone="subdued">
+                  this month
                 </Text>
               </InlineStack>
               <BlockStack gap="200">
@@ -276,7 +284,11 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
                 />
                 <InlineStack align="space-between">
                   <Text as="p" variant="bodySm">
-                    {billing?.emailUsed ?? 0} / {billing?.emailLimit ?? 0}
+                    {billing?.emailUsed ?? 0} of{" "}
+                    {typeof billing?.emailLimit === "number"
+                      ? billing.emailLimit
+                      : billing?.emailLimit ?? 0}{" "}
+                    sent
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
                     {Math.round(getEmailProgress())}% used
@@ -288,42 +300,87 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
         </Layout.Section>
 
         <Layout.Section variant="oneHalf">
-          <Card>
-            <BlockStack gap="300">
-              <InlineStack gap="200" blockAlign="center">
-                <Icon source={ChatIcon} tone="base" />
-                <Text as="h3" variant="headingMd">
-                  WhatsApp usage
-                </Text>
-              </InlineStack>
-              <BlockStack gap="200">
-                <ProgressBar
-                  progress={getWhatsappProgress()}
-                  tone={getWhatsappProgress() > 80 ? "critical" : "primary"}
-                />
-                <InlineStack align="space-between">
-                  <Text as="p" variant="bodySm">
-                    {billing?.whatsappUsed ?? 0} / {billing?.whatsappLimit ?? 0}
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {Math.round(getWhatsappProgress())}% used
-                  </Text>
+          {isPremium ? (
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={ChatIcon} tone="base" />
+                    <Text as="h3" variant="headingMd">
+                      WhatsApp alerts
+                    </Text>
+                  </InlineStack>
+                  <Badge tone="success">ACTIVE</Badge>
                 </InlineStack>
+                <BlockStack gap="200">
+                  <ProgressBar
+                    progress={
+                      billing && typeof billing.whatsappLimit === "number" && billing.whatsappLimit > 0
+                        ? Math.min((billing.whatsappUsed / billing.whatsappLimit) * 100, 100)
+                        : 0
+                    }
+                    tone="primary"
+                  />
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm">
+                      {billing?.whatsappUsed ?? 0} of{" "}
+                      {typeof billing?.whatsappLimit === "number"
+                        ? billing.whatsappLimit
+                        : billing?.whatsappLimit ?? 0}{" "}
+                      sent
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      this month
+                    </Text>
+                  </InlineStack>
+                </BlockStack>
               </BlockStack>
-            </BlockStack>
-          </Card>
+            </Card>
+          ) : (
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <InlineStack gap="200" blockAlign="center">
+                    <Icon source={ChatIcon} tone="subdued" />
+                    <Text as="h3" variant="headingMd" tone="subdued">
+                      WhatsApp alerts
+                    </Text>
+                  </InlineStack>
+                  <Badge tone="info">PREMIUM</Badge>
+                </InlineStack>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Get instant low stock alerts delivered straight to your WhatsApp.
+                  Never miss a restock window again.
+                </Text>
+                <Button
+                  onClick={() => navigate("/billing")}
+                  variant="plain"
+                >
+                  Upgrade to Premium
+                </Button>
+              </BlockStack>
+            </Card>
+          )}
         </Layout.Section>
 
         <Layout.Section>
-          {alerts.length > 0 ? (
+          {hasAlerts ? (
             <Card padding="0">
               <BlockStack>
                 <Box padding="400">
-                  <InlineStack gap="200" blockAlign="center">
-                    <Icon source={AlertCircleIcon} tone="caution" />
-                    <Text as="h2" variant="headingMd">
-                      Active alerts ({alerts.length})
-                    </Text>
+                  <InlineStack align="space-between" blockAlign="center">
+                    <InlineStack gap="200" blockAlign="center">
+                      <Icon source={AlertCircleIcon} tone="caution" />
+                      <Text as="h2" variant="headingMd">
+                        Active alerts ({alerts.length})
+                      </Text>
+                    </InlineStack>
+                    <Button
+                      variant="plain"
+                      onClick={() => navigate("/settings")}
+                    >
+                      Adjust thresholds
+                    </Button>
                   </InlineStack>
                 </Box>
                 <Divider />
@@ -350,30 +407,95 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
           ) : (
             <Card>
               <EmptyState
-                heading="No active alerts"
+                heading="All stocked up!"
                 image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                action={{
+                  content: "Configure alert thresholds",
+                  onAction: () => navigate("/settings"),
+                }}
+                secondaryAction={{
+                  content: "View billing",
+                  onAction: () => navigate("/billing"),
+                }}
               >
                 <p>
-                  When your product inventory drops below the configured
-                  thresholds, alerts will appear here. Your inventory is being
-                  monitored automatically.
+                  None of your products are below their alert thresholds right
+                  now. When inventory runs low, you'll see alerts here and
+                  receive notifications automatically.
                 </p>
               </EmptyState>
             </Card>
           )}
         </Layout.Section>
 
-        <Layout.Section>
-          <Card>
-            <InlineStack gap="200" blockAlign="center">
-              <Icon source={ChartVerticalFilledIcon} tone="success" />
-              <Text as="p" variant="bodyMd" tone="success">
-                All systems operational. Alerts are being monitored for your
-                products.
-              </Text>
-            </InlineStack>
-          </Card>
-        </Layout.Section>
+        {!hasAlerts && (
+          <Layout.Section>
+            <CalloutCard
+              title="How Low Stock Alerts works"
+              illustration="https://cdn.shopify.com/s/assets/admin/checkout/settings-customizecart-702d57c108542974c38f0b28c1f45f08af0ad1b5446a2b6eae58e9a3d9ab4e26.svg"
+              primaryAction={{
+                content: "Configure settings",
+                onAction: () => navigate("/settings"),
+              }}
+            >
+              <BlockStack gap="200">
+                <Text as="p" variant="bodyMd">
+                  We continuously monitor your Shopify inventory and send you
+                  alerts the moment stock drops below your thresholds.
+                </Text>
+                <List>
+                  <List.Item>
+                    Set custom thresholds per product or use a global default
+                  </List.Item>
+                  <List.Item>
+                    Receive alerts via email
+                    {isPremium ? " or WhatsApp" : " (or WhatsApp on Premium)"}
+                  </List.Item>
+                  <List.Item>
+                    Batch alerts into hourly, daily, or weekly digests
+                  </List.Item>
+                  <List.Item>
+                    Track all alerts and usage from this dashboard
+                  </List.Item>
+                </List>
+              </BlockStack>
+            </CalloutCard>
+          </Layout.Section>
+        )}
+
+        {!hasAlerts && currentPlan === "free" && (
+          <Layout.Section>
+            <CalloutCard
+              title="Unlock more with Premium"
+              illustration="https://cdn.shopify.com/s/assets/admin/checkout/settings-customizecart-702d57c108542974c38f0b28c1f45f08af0ad1b5446a2b6eae58e9a3d9ab4e26.svg"
+              primaryAction={{
+                content: "View plans",
+                onAction: () => navigate("/billing"),
+              }}
+            >
+              <BlockStack gap="200">
+                <Text as="p" variant="bodyMd">
+                  You're on the Free plan with 50 email alerts per month. Upgrade
+                  to unlock more features:
+                </Text>
+                <List>
+                  <List.Item>
+                    <Text as="span" fontWeight="semibold">
+                      Pro:
+                    </Text>{" "}
+                    500 email alerts + alert batching
+                  </List.Item>
+                  <List.Item>
+                    <Text as="span" fontWeight="semibold">
+                      Premium:
+                    </Text>{" "}
+                    Unlimited emails + WhatsApp alerts + priority support
+                  </List.Item>
+                </List>
+              </BlockStack>
+            </CalloutCard>
+          </Layout.Section>
+        )}
       </Layout>
     </Page>
   );
