@@ -835,9 +835,6 @@ export async function registerRoutes(
           "products/create",
           "products/update",
           "app/uninstalled",
-          "customers/data_request",
-          "customers/redact",
-          "shop/redact",
         ];
 
         const missingTopics = requiredTopics.filter(

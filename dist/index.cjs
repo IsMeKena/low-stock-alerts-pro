@@ -679,10 +679,7 @@ async function registerWebhooks(shop, accessToken) {
       { topic: "app/uninstalled", address: `${baseUrl}/api/webhooks/app/uninstalled` },
       { topic: "products/create", address: `${baseUrl}/api/webhooks/products/create` },
       { topic: "products/update", address: `${baseUrl}/api/webhooks/products/update` },
-      { topic: "inventory_levels/update", address: `${baseUrl}/api/webhooks/inventory_levels/update` },
-      { topic: "customers/data_request", address: `${baseUrl}/api/webhooks/customers/data_request` },
-      { topic: "customers/redact", address: `${baseUrl}/api/webhooks/customers/redact` },
-      { topic: "shop/redact", address: `${baseUrl}/api/webhooks/shop/redact` }
+      { topic: "inventory_levels/update", address: `${baseUrl}/api/webhooks/inventory_levels/update` }
     ];
     const client2 = new shopify.clients.Rest({
       session: {
@@ -714,32 +711,14 @@ async function registerWebhooks(shop, accessToken) {
       } catch (error) {
         const statusCode = error?.response?.code || error?.code || "unknown";
         const body = error?.response?.body || error?.message || "unknown error";
-        if (statusCode === 409 || String(body).includes("already been taken")) {
-          console.log(`[webhook] \u26A0\uFE0F ${webhook.topic} already registered (updating)`);
-          try {
-            const existing = await client2.get({ path: "webhooks" });
-            const webhooks = existing?.body?.webhooks || [];
-            const match = webhooks.find((w) => w.topic === webhook.topic);
-            if (match) {
-              await client2.put({
-                path: `webhooks/${match.id}`,
-                data: {
-                  webhook: {
-                    id: match.id,
-                    address: webhook.address
-                  }
-                }
-              });
-              successCount++;
-              console.log(`[webhook] \u2705 Updated ${webhook.topic}`);
-            }
-          } catch (updateErr) {
-            console.error(`[webhook] \u274C Failed to update ${webhook.topic}:`, updateErr);
-          }
+        const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
+        if (statusCode === 409 || statusCode === 422 || bodyStr.includes("already been taken")) {
+          console.log(`[webhook] \u2705 ${webhook.topic} already registered`);
+          successCount++;
         } else {
           console.error(
             `[webhook] \u274C Failed to register ${webhook.topic} (status=${statusCode}):`,
-            typeof body === "string" ? body : JSON.stringify(body)
+            bodyStr
           );
         }
       }
@@ -3421,10 +3400,7 @@ async function registerRoutes(httpServer2, app2) {
           "inventory_levels/update",
           "products/create",
           "products/update",
-          "app/uninstalled",
-          "customers/data_request",
-          "customers/redact",
-          "shop/redact"
+          "app/uninstalled"
         ];
         const missingTopics = requiredTopics.filter(
           (t) => !registeredTopics.includes(t)

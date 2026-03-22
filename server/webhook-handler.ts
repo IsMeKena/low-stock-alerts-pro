@@ -72,9 +72,6 @@ export async function registerWebhooks(
       { topic: "products/create", address: `${baseUrl}/api/webhooks/products/create` },
       { topic: "products/update", address: `${baseUrl}/api/webhooks/products/update` },
       { topic: "inventory_levels/update", address: `${baseUrl}/api/webhooks/inventory_levels/update` },
-      { topic: "customers/data_request", address: `${baseUrl}/api/webhooks/customers/data_request` },
-      { topic: "customers/redact", address: `${baseUrl}/api/webhooks/customers/redact` },
-      { topic: "shop/redact", address: `${baseUrl}/api/webhooks/shop/redact` },
     ];
 
     const client = new shopify.clients.Rest({
@@ -111,33 +108,15 @@ export async function registerWebhooks(
       } catch (error: any) {
         const statusCode = error?.response?.code || error?.code || "unknown";
         const body = error?.response?.body || error?.message || "unknown error";
+        const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
 
-        if (statusCode === 409 || String(body).includes("already been taken")) {
-          console.log(`[webhook] ⚠️ ${webhook.topic} already registered (updating)`);
-          try {
-            const existing = await client.get({ path: "webhooks" });
-            const webhooks = (existing?.body as any)?.webhooks || [];
-            const match = webhooks.find((w: any) => w.topic === webhook.topic);
-            if (match) {
-              await client.put({
-                path: `webhooks/${match.id}`,
-                data: {
-                  webhook: {
-                    id: match.id,
-                    address: webhook.address,
-                  },
-                },
-              });
-              successCount++;
-              console.log(`[webhook] ✅ Updated ${webhook.topic}`);
-            }
-          } catch (updateErr) {
-            console.error(`[webhook] ❌ Failed to update ${webhook.topic}:`, updateErr);
-          }
+        if (statusCode === 409 || statusCode === 422 || bodyStr.includes("already been taken")) {
+          console.log(`[webhook] ✅ ${webhook.topic} already registered`);
+          successCount++;
         } else {
           console.error(
             `[webhook] ❌ Failed to register ${webhook.topic} (status=${statusCode}):`,
-            typeof body === "string" ? body : JSON.stringify(body)
+            bodyStr
           );
         }
       }
