@@ -479,6 +479,103 @@ export async function registerRoutes(
     }
   );
 
+  // App uninstalled webhook — delete all shop data
+  app.post("/api/webhooks/app/uninstalled", async (req: Request, res: Response) => {
+    try {
+      const secret = process.env.SHOPIFY_API_SECRET || "";
+
+      if (!verifyWebhookSignature(req, secret)) {
+        console.log("[webhook] Invalid signature for app/uninstalled");
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const shopDomain = req.headers["x-shopify-shop-domain"] as string;
+      if (!shopDomain) {
+        console.log("[webhook] Missing shop domain header for app/uninstalled");
+        res.status(400).json({ error: "Missing shop domain" });
+        return;
+      }
+
+      logWebhookEvent("app/uninstalled", shopDomain, req.body);
+
+      const { processAppUninstalled } = await import("./webhook-processors");
+      await processAppUninstalled(shopDomain, req.body);
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      console.error("[webhook] Error handling app/uninstalled:", error);
+      res.status(200).json({ success: true });
+    }
+  });
+
+  // GDPR mandatory webhooks
+  app.post("/api/webhooks/customers/data_request", async (req: Request, res: Response) => {
+    try {
+      const secret = process.env.SHOPIFY_API_SECRET || "";
+
+      if (!verifyWebhookSignature(req, secret)) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const shopDomain = req.headers["x-shopify-shop-domain"] as string || "unknown";
+      logWebhookEvent("customers/data_request", shopDomain, req.body);
+
+      const { processCustomersDataRequest } = await import("./webhook-processors");
+      await processCustomersDataRequest(shopDomain, req.body);
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      console.error("[webhook] Error handling customers/data_request:", error);
+      res.status(200).json({ success: true });
+    }
+  });
+
+  app.post("/api/webhooks/customers/redact", async (req: Request, res: Response) => {
+    try {
+      const secret = process.env.SHOPIFY_API_SECRET || "";
+
+      if (!verifyWebhookSignature(req, secret)) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const shopDomain = req.headers["x-shopify-shop-domain"] as string || "unknown";
+      logWebhookEvent("customers/redact", shopDomain, req.body);
+
+      const { processCustomersRedact } = await import("./webhook-processors");
+      await processCustomersRedact(shopDomain, req.body);
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      console.error("[webhook] Error handling customers/redact:", error);
+      res.status(200).json({ success: true });
+    }
+  });
+
+  app.post("/api/webhooks/shop/redact", async (req: Request, res: Response) => {
+    try {
+      const secret = process.env.SHOPIFY_API_SECRET || "";
+
+      if (!verifyWebhookSignature(req, secret)) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const shopDomain = req.headers["x-shopify-shop-domain"] as string || "unknown";
+      logWebhookEvent("shop/redact", shopDomain, req.body);
+
+      const { processShopRedact } = await import("./webhook-processors");
+      await processShopRedact(shopDomain, req.body);
+
+      res.status(200).json({ success: true });
+    } catch (error) {
+      console.error("[webhook] Error handling shop/redact:", error);
+      res.status(200).json({ success: true });
+    }
+  });
+
   console.log("[routes] Auth, shop, and webhook routes registered");
 
   // Register billing and onboarding routes

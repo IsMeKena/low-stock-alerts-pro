@@ -14,15 +14,26 @@ redirect_urls = [
 [webhooks]
 api_version = "2024-10"
 
-  [webhooks.subscriptions]
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "/api/webhooks/app/uninstalled"
 
-  [[webhooks.subscriptions.compliance]]
-  topics = ["customers/data_request", "customers/redact", "shop/redact"]
-  uri = "/api/webhooks/compliance"
+  [[webhooks.subscriptions]]
+  topics = ["products/create"]
+  uri = "/api/webhooks/products/create"
 
-  [[webhooks.subscriptions.event]]
-  topics = ["products/create", "products/update", "inventory_levels/update"]
-  uri = "/api/webhooks"
+  [[webhooks.subscriptions]]
+  topics = ["products/update"]
+  uri = "/api/webhooks/products/update"
+
+  [[webhooks.subscriptions]]
+  topics = ["inventory_levels/update"]
+  uri = "/api/webhooks/inventory_levels/update"
+
+[webhooks.privacy_compliance]
+customer_data_request_url = "/api/webhooks/customers/data_request"
+customer_deletion_url = "/api/webhooks/customers/redact"
+shop_deletion_url = "/api/webhooks/shop/redact"
 
 [pos]
 embedded = false

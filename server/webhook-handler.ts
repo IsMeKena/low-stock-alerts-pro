@@ -76,6 +76,10 @@ export async function registerWebhooks(
 
     const webhooksToRegister = [
       {
+        topic: "app/uninstalled",
+        address: `${baseUrl}/api/webhooks/app/uninstalled`,
+      },
+      {
         topic: "products/create",
         address: `${baseUrl}/api/webhooks/products/create`,
       },
@@ -86,6 +90,18 @@ export async function registerWebhooks(
       {
         topic: "inventory_levels/update",
         address: `${baseUrl}/api/webhooks/inventory_levels/update`,
+      },
+      {
+        topic: "customers/data_request",
+        address: `${baseUrl}/api/webhooks/customers/data_request`,
+      },
+      {
+        topic: "customers/redact",
+        address: `${baseUrl}/api/webhooks/customers/redact`,
+      },
+      {
+        topic: "shop/redact",
+        address: `${baseUrl}/api/webhooks/shop/redact`,
       },
     ];
 

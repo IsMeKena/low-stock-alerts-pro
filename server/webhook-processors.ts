@@ -1,5 +1,14 @@
 import { db } from "./db";
-import { products, inventory } from "@shared/schema.ts";
+import {
+  products,
+  inventory,
+  alerts,
+  shopSettings,
+  billingPlans,
+  usageTracker,
+  batchingQueue,
+  shopifySessions,
+} from "@shared/schema.ts";
 import { eq, and } from "drizzle-orm";
 import { checkInventoryAlert } from "./alerts";
 
@@ -144,5 +153,91 @@ export async function processInventoryUpdate(
     }
   } catch (error) {
     console.error("[webhook] Error processing inventory update:", error);
+  }
+}
+
+export async function processAppUninstalled(
+  shop: string,
+  _payload: any
+): Promise<void> {
+  try {
+    console.log(`[webhook] Processing app/uninstalled for ${shop} — deleting all shop data`);
+
+    await db.delete(batchingQueue).where(eq(batchingQueue.shopDomain, shop));
+    console.log(`[webhook] Deleted batching queue entries for ${shop}`);
+
+    await db.delete(alerts).where(eq(alerts.shopDomain, shop));
+    console.log(`[webhook] Deleted alerts for ${shop}`);
+
+    await db.delete(inventory).where(eq(inventory.shopDomain, shop));
+    console.log(`[webhook] Deleted inventory for ${shop}`);
+
+    await db.delete(products).where(eq(products.shopDomain, shop));
+    console.log(`[webhook] Deleted products for ${shop}`);
+
+    await db.delete(usageTracker).where(eq(usageTracker.shopDomain, shop));
+    console.log(`[webhook] Deleted usage tracking for ${shop}`);
+
+    await db.delete(billingPlans).where(eq(billingPlans.shopDomain, shop));
+    console.log(`[webhook] Deleted billing plan for ${shop}`);
+
+    await db.delete(shopSettings).where(eq(shopSettings.shopDomain, shop));
+    console.log(`[webhook] Deleted shop settings for ${shop}`);
+
+    await db.delete(shopifySessions).where(eq(shopifySessions.shop, shop));
+    console.log(`[webhook] Deleted sessions for ${shop}`);
+
+    console.log(`[webhook] All data deleted for uninstalled shop ${shop}`);
+  } catch (error) {
+    console.error("[webhook] Error processing app/uninstalled:", error);
+  }
+}
+
+export async function processCustomersDataRequest(
+  shop: string,
+  payload: any
+): Promise<void> {
+  try {
+    const { customer, orders_requested } = payload;
+    console.log(
+      `[webhook] customers/data_request from ${shop} for customer ${customer?.id}`
+    );
+    console.log(
+      `[webhook] This app does not store customer-specific data. No data to export.`
+    );
+  } catch (error) {
+    console.error("[webhook] Error processing customers/data_request:", error);
+  }
+}
+
+export async function processCustomersRedact(
+  shop: string,
+  payload: any
+): Promise<void> {
+  try {
+    const { customer } = payload;
+    console.log(
+      `[webhook] customers/redact from ${shop} for customer ${customer?.id}`
+    );
+    console.log(
+      `[webhook] This app does not store customer-specific data. No data to redact.`
+    );
+  } catch (error) {
+    console.error("[webhook] Error processing customers/redact:", error);
+  }
+}
+
+export async function processShopRedact(
+  shop: string,
+  _payload: any
+): Promise<void> {
+  try {
+    console.log(
+      `[webhook] shop/redact from ${shop} — deleting all remaining shop data`
+    );
+    await processAppUninstalled(shop, _payload);
+    console.log(`[webhook] Shop redact complete for ${shop}`);
+  } catch (error) {
+    console.error("[webhook] Error processing shop/redact:", error);
   }
 }
