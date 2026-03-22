@@ -51,7 +51,7 @@ const PLANS = [
   {
     key: "free",
     name: "Free",
-    price: "$0",
+    price: "Free",
     priceNote: "forever",
     features: [
       "10 email alerts per month",
@@ -68,7 +68,7 @@ const PLANS = [
   {
     key: "pro",
     name: "Pro",
-    price: "$9.99",
+    price: "$5",
     priceNote: "per month",
     features: [
       "500 email alerts per month",
@@ -85,7 +85,7 @@ const PLANS = [
   {
     key: "premium",
     name: "Premium",
-    price: "$24.99",
+    price: "$15",
     priceNote: "per month",
     features: [
       "Unlimited email alerts",
@@ -132,21 +132,45 @@ export default function Billing({ shop }: BillingProps) {
     setSuccessMsg(null);
 
     try {
-      const response = await authenticatedFetch("/api/billing/upgrade", {
-        method: "POST",
-        body: JSON.stringify({ shop, plan: planKey }),
-      });
+      if (planKey === "free") {
+        const response = await authenticatedFetch("/api/billing/upgrade", {
+          method: "POST",
+          body: JSON.stringify({ shop, plan: planKey }),
+        });
 
-      if (!response.ok) {
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Failed to change plan");
+        }
+
+        setSuccessMsg("Downgraded to Free plan.");
+        await fetchBilling();
+      } else {
+        const response = await authenticatedFetch(
+          `/api/billing/subscribe?shop=${shop}&plan=${planKey}`
+        );
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Failed to start subscription");
+        }
+
         const data = await response.json();
-        throw new Error(data.error || "Failed to change plan");
-      }
 
-      const data = await response.json();
-      setSuccessMsg(
-        `Plan changed to ${planKey.charAt(0).toUpperCase() + planKey.slice(1)}!`
-      );
-      await fetchBilling();
+        if (data.confirmationUrl) {
+          if (window.shopify) {
+            window.open(data.confirmationUrl, "_top");
+          } else {
+            window.location.href = data.confirmationUrl;
+          }
+          return;
+        }
+
+        setSuccessMsg(
+          `Plan changed to ${planKey.charAt(0).toUpperCase() + planKey.slice(1)}!`
+        );
+        await fetchBilling();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to change plan");
     } finally {

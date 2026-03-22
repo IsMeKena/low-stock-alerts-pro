@@ -9,13 +9,56 @@ import { db } from "../db";
 import { shopSettings } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { verifySessionToken } from "../middleware";
+import { shopify } from "../shopify";
+import { sessionStorage } from "../shopify-session-storage";
+
+const SHOPIFY_PLANS: Record<string, { name: string; price: number; trialDays: number }> = {
+  pro: { name: "Pro", price: 5.0, trialDays: 0 },
+  premium: { name: "Premium", price: 15.0, trialDays: 0 },
+};
+
+async function getOfflineSession(shop: string) {
+  const sessionId = `offline_${shop}`;
+  const session = await sessionStorage.loadSession(sessionId);
+  if (!session || !session.accessToken) {
+    const sessions = await sessionStorage.findSessionsByShop(shop);
+    const validSession = sessions.find((s) => s.accessToken);
+    if (!validSession) {
+      throw new Error(`No valid session found for ${shop}`);
+    }
+    return validSession;
+  }
+  return session;
+}
+
+async function cancelActiveSubscription(shop: string) {
+  try {
+    const session = await getOfflineSession(shop);
+    const client = new shopify.clients.Rest({
+      session: session as any,
+    });
+
+    const response = await client.get({
+      path: "recurring_application_charges",
+    }) as any;
+
+    const charges = response.body?.recurring_application_charges || [];
+    const activeCharge = charges.find((c: any) => c.status === "active");
+
+    if (activeCharge) {
+      await client.delete({
+        path: `recurring_application_charges/${activeCharge.id}`,
+      });
+      console.log(`[billing-api] Cancelled active subscription ${activeCharge.id} for ${shop}`);
+    } else {
+      console.log(`[billing-api] No active subscription to cancel for ${shop}`);
+    }
+  } catch (error) {
+    console.error(`[billing-api] Error cancelling subscription for ${shop}:`, error);
+  }
+}
 
 export function setupBillingRoutes(router: Router) {
-  /**
-   * GET /api/billing/plan
-   * Get current billing plan and usage stats
-   * Protected: requires valid session token
-   */
   router.get("/api/billing/plan", async (req: Request, res: Response) => {
     try {
       const shop = req.query.shop as string;
@@ -37,15 +80,12 @@ export function setupBillingRoutes(router: Router) {
     }
   });
 
-  /**
-   * GET /api/billing/usage
-   * Get detailed usage statistics
-   * Protected: requires valid session token
-   */
-  router.get("/api/billing/usage", verifySessionToken, async (req: Request, res: Response) => {
+  router.get("/api/billing/usage", async (req: Request, res: Response) => {
     try {
-      const session = (req as any).shopifySession;
-      const shop = session.shop;
+      const shop = req.query.shop as string;
+      if (!shop) {
+        return res.status(400).json({ error: "Missing shop parameter" });
+      }
 
       const usage = await getRemainingUsage(shop);
 
@@ -66,11 +106,6 @@ export function setupBillingRoutes(router: Router) {
     }
   });
 
-  /**
-   * POST /api/billing/upgrade
-   * Request plan upgrade (stub for now - future: Stripe integration)
-   * Protected: requires valid session token
-   */
   router.post("/api/billing/upgrade", async (req: Request, res: Response) => {
     try {
       const { shop, plan } = req.body;
@@ -90,6 +125,13 @@ export function setupBillingRoutes(router: Router) {
       const currentPlan = await getUserPlan(shop);
       console.log(`[billing-api] Plan change requested: ${shop} from ${currentPlan} to ${plan}`);
 
+      if (plan !== "free") {
+        return res.status(400).json({
+          error: "Paid plans must be activated through Shopify billing. Use /api/billing/subscribe instead.",
+        });
+      }
+
+      await cancelActiveSubscription(shop);
       await setPlan(shop, plan);
 
       res.json({
@@ -101,6 +143,133 @@ export function setupBillingRoutes(router: Router) {
     } catch (error) {
       console.error("[billing-api] Error upgrading plan:", error);
       res.status(500).json({ error: "Failed to upgrade plan" });
+    }
+  });
+
+  router.get("/api/billing/subscribe", async (req: Request, res: Response) => {
+    try {
+      const shop = req.query.shop as string;
+      const plan = req.query.plan as string;
+
+      if (!shop || !plan) {
+        return res.status(400).json({ error: "Missing shop or plan parameter" });
+      }
+
+      const planConfig = SHOPIFY_PLANS[plan];
+      if (!planConfig) {
+        return res.status(400).json({ error: `Invalid plan: ${plan}. Must be 'pro' or 'premium'.` });
+      }
+
+      console.log(`[billing-api] Creating Shopify subscription for ${shop}: ${plan} ($${planConfig.price}/mo)`);
+
+      const session = await getOfflineSession(shop);
+
+      const client = new shopify.clients.Rest({
+        session: session as any,
+      });
+
+      const appUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN}`;
+      const returnUrl = `${appUrl}/api/billing/callback?shop=${encodeURIComponent(shop)}&plan=${encodeURIComponent(plan)}`;
+
+      const response = await client.post({
+        path: "recurring_application_charges",
+        data: {
+          recurring_application_charge: {
+            name: `Low Stock Alerts Pro - ${planConfig.name}`,
+            price: planConfig.price,
+            return_url: returnUrl,
+            trial_days: planConfig.trialDays,
+            test: process.env.NODE_ENV !== "production",
+          },
+        },
+      }) as any;
+
+      const charge = response.body?.recurring_application_charge;
+
+      if (!charge || !charge.confirmation_url) {
+        console.error("[billing-api] No confirmation URL in Shopify response:", response.body);
+        return res.status(500).json({ error: "Failed to create subscription" });
+      }
+
+      console.log(`[billing-api] Subscription created for ${shop}: charge ID ${charge.id}`);
+      console.log(`[billing-api] Confirmation URL: ${charge.confirmation_url}`);
+
+      res.json({
+        confirmationUrl: charge.confirmation_url,
+        chargeId: charge.id,
+      });
+    } catch (error: any) {
+      console.error("[billing-api] Error creating subscription:", error?.response?.body || error);
+      res.status(500).json({ error: "Failed to create Shopify subscription" });
+    }
+  });
+
+  router.get("/api/billing/callback", async (req: Request, res: Response) => {
+    try {
+      const shop = req.query.shop as string;
+      const plan = req.query.plan as string;
+      const chargeId = req.query.charge_id as string;
+
+      if (!shop || !plan || !chargeId) {
+        console.error("[billing-api] Missing callback parameters:", { shop, plan, chargeId });
+        return res.redirect(`/?shop=${encodeURIComponent(shop || "")}`);
+      }
+
+      console.log(`[billing-api] Billing callback for ${shop}: plan=${plan}, charge_id=${chargeId}`);
+
+      const session = await getOfflineSession(shop);
+
+      const client = new shopify.clients.Rest({
+        session: session as any,
+      });
+
+      const response = await client.get({
+        path: `recurring_application_charges/${chargeId}`,
+      }) as any;
+
+      const charge = response.body?.recurring_application_charge;
+
+      if (!charge) {
+        console.error("[billing-api] Could not find charge:", chargeId);
+        return res.redirect(`/?shop=${encodeURIComponent(shop)}`);
+      }
+
+      console.log(`[billing-api] Charge status for ${shop}: ${charge.status}`);
+
+      if (charge.status === "accepted") {
+        const activateResponse = await client.post({
+          path: `recurring_application_charges/${chargeId}/activate`,
+          data: {
+            recurring_application_charge: {
+              id: chargeId,
+            },
+          },
+        }) as any;
+
+        const activatedCharge = activateResponse.body?.recurring_application_charge;
+        console.log(`[billing-api] Charge activated for ${shop}: ${activatedCharge?.status}`);
+
+        if (activatedCharge?.status === "active") {
+          await setPlan(shop, plan as "free" | "pro" | "premium");
+          console.log(`[billing-api] Plan set to ${plan} for ${shop}`);
+        } else {
+          console.error(`[billing-api] Charge not active after activation: ${activatedCharge?.status}`);
+        }
+      } else if (charge.status === "active") {
+        await setPlan(shop, plan as "free" | "pro" | "premium");
+        console.log(`[billing-api] Charge already active, plan set to ${plan} for ${shop}`);
+      } else if (charge.status === "declined") {
+        console.log(`[billing-api] Charge declined by merchant ${shop}`);
+      } else {
+        console.log(`[billing-api] Unexpected charge status for ${shop}: ${charge.status}`);
+      }
+
+      const appUrl = process.env.APP_URL || `https://${process.env.REPLIT_DEV_DOMAIN}`;
+      return res.redirect(`${appUrl}/?shop=${encodeURIComponent(shop)}`);
+    } catch (error) {
+      console.error("[billing-api] Error in billing callback:", error);
+      const shop = req.query.shop as string;
+      return res.redirect(`/?shop=${encodeURIComponent(shop || "")}`);
     }
   });
 
