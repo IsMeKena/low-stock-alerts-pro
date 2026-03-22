@@ -73,8 +73,12 @@ export default function Settings({ shop }: SettingsProps) {
   }, [shop]);
 
   useEffect(() => {
-    fetchSettings();
-  }, [fetchSettings]);
+    if (shop) {
+      fetchSettings();
+    } else {
+      setLoading(false);
+    }
+  }, [shop, fetchSettings]);
 
   const isDirty = useMemo(() => {
     if (!settings || !savedSettings) return false;

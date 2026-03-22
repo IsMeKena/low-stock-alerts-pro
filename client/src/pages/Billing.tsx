@@ -122,8 +122,12 @@ export default function Billing({ shop }: BillingProps) {
   }, [shop]);
 
   useEffect(() => {
-    fetchBilling();
-  }, [fetchBilling]);
+    if (shop) {
+      fetchBilling();
+    } else {
+      setLoading(false);
+    }
+  }, [shop, fetchBilling]);
 
   const handleUpgrade = async (planKey: string) => {
     if (!shop) return;

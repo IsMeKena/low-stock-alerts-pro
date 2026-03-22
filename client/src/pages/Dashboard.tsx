@@ -114,6 +114,8 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
   useEffect(() => {
     if (shop) {
       fetchData();
+    } else {
+      setLoading(false);
     }
   }, [shop, fetchData]);
 
