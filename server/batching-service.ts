@@ -1,10 +1,11 @@
 import { db } from "./db";
-import { batchingQueue, shopSettings } from "@shared/schema";
+import { batchingQueue, shopSettings, products } from "@shared/schema";
 import { eq, and, lte } from "drizzle-orm";
 import {
   sendWhatsAppMessage,
   formatBatchedAlertsMessage,
 } from "./twilio-service";
+import { sendDailyStockSummary } from "./email";
 
 /**
  * Batch interval durations in milliseconds
@@ -17,6 +18,7 @@ const BATCH_INTERVALS = {
 
 /**
  * Add alert to batching queue
+ * Exported as both addToBatch and enqueueBatchAlert for compatibility
  */
 export async function addToBatch(
   shop: string,
@@ -63,12 +65,15 @@ export async function addToBatch(
     });
 
     console.log(
-      `[batching] Added alert ${alertId} to batch queue for ${shop}`
+      `[batching] Added alert ${alertId} to batch queue for ${shop} (${alertType}, scheduled for ${scheduledFor.toISOString()})`
     );
   } catch (error) {
     console.error("[batching] Error adding to batch:", error);
   }
 }
+
+// Alias for addToBatch
+export const enqueueBatchAlert = addToBatch;
 
 /**
  * Get pending batches ready to send
@@ -116,22 +121,27 @@ export async function getPendingBatches(
 }
 
 /**
- * Format batch for WhatsApp sending
+ * Resolve product names from IDs for batch messages
  */
-async function formatWhatsAppBatch(
+async function resolveProductNames(
   alerts: any[]
-): Promise<{
-  productName: string;
-  quantity: number;
-  threshold: number;
-  location?: string;
-}[]> {
-  return alerts.map((alert) => ({
-    productName: `Product ${alert.productId.substring(0, 8)}...`,
-    quantity: alert.quantity,
-    threshold: alert.threshold,
-    location: alert.locationId || undefined,
-  }));
+): Promise<{ productName: string; quantity: number; threshold: number; location?: string }[]> {
+  return Promise.all(
+    alerts.map(async (alert) => {
+      const product = await db
+        .select()
+        .from(products)
+        .where(eq(products.shopifyProductId, alert.productId))
+        .limit(1);
+
+      return {
+        productName: product.length ? product[0].title : `Product ${alert.productId.substring(0, 8)}...`,
+        quantity: alert.quantity,
+        threshold: alert.threshold,
+        location: alert.locationId || undefined,
+      };
+    })
+  );
 }
 
 /**
@@ -160,13 +170,13 @@ export async function sendBatch(
       return;
     }
 
-    if (alertType === "whatsapp") {
-      const settings = await db
-        .select()
-        .from(shopSettings)
-        .where(eq(shopSettings.shopDomain, shop))
-        .limit(1);
+    const settings = await db
+      .select()
+      .from(shopSettings)
+      .where(eq(shopSettings.shopDomain, shop))
+      .limit(1);
 
+    if (alertType === "whatsapp") {
       if (!settings.length || !settings[0].whatsappNumber) {
         console.warn(
           `[batching] No WhatsApp number configured for ${shop}`
@@ -181,9 +191,9 @@ export async function sendBatch(
         return;
       }
 
-      // Format batch message
-      const formatted = await formatWhatsAppBatch(pending);
-      const message = formatBatchedAlertsMessage(formatted);
+      // Resolve product names and format batch message
+      const resolved = await resolveProductNames(pending);
+      const message = formatBatchedAlertsMessage(resolved);
 
       // Send
       const result = await sendWhatsAppMessage(
@@ -216,24 +226,49 @@ export async function sendBatch(
             .where(eq(batchingQueue.id, alert.id));
         }
 
-        console.error(`[batching] Failed to send batch for ${shop}`);
+        console.error(`[batching] Failed to send WhatsApp batch for ${shop}`);
       }
     } else if (alertType === "email") {
-      // For email batching, send digest email
-      console.log(
-        `[batching] Email batch sending stub for ${shop}: ${pending.length} alerts`
-      );
+      // Send email digest with actual product names
+      const recipientEmail = settings.length ? settings[0].notificationEmail : null;
 
-      // Mark as sent
+      if (!recipientEmail) {
+        console.warn(`[batching] No notification email configured for ${shop}`);
+        for (const alert of pending) {
+          await db
+            .update(batchingQueue)
+            .set({ status: "failed" })
+            .where(eq(batchingQueue.id, alert.id));
+        }
+        return;
+      }
+
+      const resolved = await resolveProductNames(pending);
+      const lowStockItems = resolved.map((item) => ({
+        productTitle: item.productName,
+        quantity: item.quantity,
+        threshold: item.threshold,
+      }));
+
+      const sent = await sendDailyStockSummary(shop, lowStockItems, recipientEmail);
+
       const now = new Date();
       for (const alert of pending) {
         await db
           .update(batchingQueue)
           .set({
-            status: "sent",
-            sentAt: now,
+            status: sent ? "sent" : "failed",
+            sentAt: sent ? now : undefined,
           })
           .where(eq(batchingQueue.id, alert.id));
+      }
+
+      if (sent) {
+        console.log(
+          `[batching] Sent email digest with ${pending.length} alerts for ${shop}`
+        );
+      } else {
+        console.error(`[batching] Failed to send email digest for ${shop}`);
       }
     }
   } catch (error) {

@@ -11,13 +11,15 @@ import {
   sendWhatsAppMessage,
   formatAlertMessage,
 } from "./twilio-service";
+import { sendLowStockAlert } from "./email";
+import { enqueueBatchAlert } from "./batching-service";
 
 /**
  * Calculate effective threshold based on threshold type (quantity vs percentage)
  */
 async function calculateEffectiveThreshold(
   productId: string,
-  currentQuantity: number
+  _currentQuantity: number
 ): Promise<number> {
   try {
     const product = await db
@@ -27,18 +29,19 @@ async function calculateEffectiveThreshold(
       .limit(1);
 
     if (!product.length) {
-      return currentQuantity; // Fallback
+      return 5; // Fallback default threshold
     }
 
     const prod = product[0];
 
     if (prod.thresholdType === "percentage" && prod.safetyStock) {
-      // Calculate: alert when < X% of safety stock
+      // Percentage mode: alert when stock falls below X% of the safety stock level
+      // Example: safetyStock=100, thresholdValue=20 => alert when stock < 20 units
       const percentage = (prod.thresholdValue || 20) / 100;
-      return Math.floor(prod.safetyStock * percentage);
+      return Math.ceil(prod.safetyStock * percentage);
     }
 
-    // Default: quantity-based threshold
+    // Default: quantity-based threshold (alert when stock <= this number)
     return prod.thresholdValue || 5;
   } catch (error) {
     console.error("[alerts] Error calculating threshold:", error);
@@ -48,6 +51,7 @@ async function calculateEffectiveThreshold(
 
 /**
  * Create a low stock alert
+ * Uses locationId in deduplication to support multi-location stores
  */
 export async function createLowStockAlert(
   shop: string,
@@ -55,26 +59,37 @@ export async function createLowStockAlert(
   locationId: string | null,
   quantity: number,
   threshold: number
-): Promise<string> {
+): Promise<string | null> {
   try {
-    const alertId = `${shop}__${productId}__${locationId}__${Date.now()}`;
+    const alertId = `${shop}__${productId}__${locationId || "default"}__${Date.now()}`;
 
-    // Check if alert already exists and is active
+    // Check if alert already exists and is active for this product AND location
+    const conditions = [
+      eq(alerts.shopDomain, shop),
+      eq(alerts.productId, productId),
+      eq(alerts.status, "active"),
+    ];
+
+    // Include locationId in dedup check for multi-location support
+    if (locationId) {
+      conditions.push(eq(alerts.locationId, locationId));
+    }
+
     const existing = await db
       .select()
       .from(alerts)
-      .where(
-        and(
-          eq(alerts.shopDomain, shop),
-          eq(alerts.productId, productId),
-          eq(alerts.status, "active")
-        )
-      )
+      .where(and(...conditions))
       .limit(1);
 
     if (existing.length > 0) {
+      // Update quantity on existing alert instead of creating duplicate
+      await db
+        .update(alerts)
+        .set({ quantity })
+        .where(eq(alerts.id, existing[0].id));
+
       console.log(
-        `[alerts] Active alert already exists for product ${productId} in ${shop}`
+        `[alerts] Updated existing alert for product ${productId} at location ${locationId || "all"} in ${shop}`
       );
       return existing[0].id;
     }
@@ -90,11 +105,19 @@ export async function createLowStockAlert(
     });
 
     console.log(
-      `[alerts] Created low stock alert for ${productId}: ${quantity}/${threshold}`
+      `[alerts] Created low stock alert for ${productId} at location ${locationId || "all"}: ${quantity}/${threshold}`
     );
 
     return alertId;
-  } catch (error) {
+  } catch (error: any) {
+    // Handle race condition: if a duplicate insert happens due to concurrent webhooks,
+    // catch the unique constraint violation and return null
+    if (error.code === "23505") {
+      console.log(
+        `[alerts] Duplicate alert suppressed for ${productId} at location ${locationId || "all"} (concurrent webhook)`
+      );
+      return null;
+    }
     console.error("[alerts] Error creating alert:", error);
     throw error;
   }
@@ -156,7 +179,7 @@ export async function getActiveAlerts(shop: string): Promise<any[]> {
 }
 
 /**
- * Send email alert (stub - actual implementation in email.ts)
+ * Send email alert - actually delivers via Mailgun
  */
 export async function sendEmailAlert(
   shop: string,
@@ -169,19 +192,36 @@ export async function sendEmailAlert(
     // Check email limit
     const canSend = await canSendEmail(shop);
     if (!canSend) {
-      console.warn(`[alerts] Email limit reached for ${shop}`);
+      console.warn(`[alerts] Email limit reached for ${shop}. Alert for "${productName}" will NOT be delivered.`);
       return false;
     }
 
-    // Track usage
-    await trackEmailUsage(shop);
+    // Get the notification email from shop settings
+    const settings = await db
+      .select()
+      .from(shopSettings)
+      .where(eq(shopSettings.shopDomain, shop))
+      .limit(1);
 
-    // Actual email sending would be handled by email.ts
-    console.log(
-      `[alerts] Email alert queued for ${shop}: ${productName} (${quantity}/${threshold})`
-    );
+    const recipientEmail = settings.length ? settings[0].notificationEmail : null;
 
-    return true;
+    if (!recipientEmail) {
+      console.warn(`[alerts] No notification email configured for ${shop}. Cannot send alert for "${productName}".`);
+      return false;
+    }
+
+    // Actually send the email via Mailgun
+    const sent = await sendLowStockAlert(shop, productName, quantity, threshold, recipientEmail);
+
+    if (sent) {
+      // Track usage only on successful send
+      await trackEmailUsage(shop);
+      console.log(`[alerts] Email alert sent for ${shop}: ${productName} (${quantity}/${threshold})`);
+    } else {
+      console.error(`[alerts] Failed to send email alert for ${shop}: ${productName}`);
+    }
+
+    return sent;
   } catch (error) {
     console.error("[alerts] Error sending email alert:", error);
     return false;
@@ -202,7 +242,7 @@ export async function sendWhatsAppAlert(
     // Check WhatsApp limit
     const canSend = await canSendWhatsApp(shop);
     if (!canSend) {
-      console.warn(`[alerts] WhatsApp limit reached for ${shop}`);
+      console.warn(`[alerts] WhatsApp limit reached for ${shop}. Alert for "${productName}" will NOT be delivered.`);
       return false;
     }
 
@@ -240,7 +280,7 @@ export async function sendWhatsAppAlert(
 
 /**
  * Check if inventory level should trigger an alert
- * Now supports smart thresholds and multiple notification channels
+ * Supports smart thresholds and multiple notification channels
  */
 export async function checkInventoryAlert(
   shop: string,
@@ -254,7 +294,7 @@ export async function checkInventoryAlert(
     const threshold = await calculateEffectiveThreshold(productId, quantity);
 
     if (quantity <= threshold) {
-      // Create alert
+      // Create alert (deduplicates per product+location)
       const alertId = await createLowStockAlert(
         shop,
         productId,
@@ -262,6 +302,11 @@ export async function checkInventoryAlert(
         quantity,
         threshold
       );
+
+      // If alertId is null, it was a duplicate from a concurrent webhook - skip notifications
+      if (!alertId) {
+        return;
+      }
 
       // Get product and settings info
       const product = await db
@@ -277,42 +322,53 @@ export async function checkInventoryAlert(
         .limit(1);
 
       const productName = product.length ? product[0].title : "Unknown Product";
+      const notificationMethod = settings.length ? settings[0].notificationMethod : "email";
+      const batchingEnabled = settings.length ? settings[0].batchingEnabled : false;
 
       // Send notifications based on settings
-      if (settings.length && settings[0].emailAlertsEnabled) {
-        await sendEmailAlert(shop, productName, quantity, threshold);
+      const shouldEmail = notificationMethod === "email" || notificationMethod === "both";
+      const shouldWhatsApp = notificationMethod === "whatsapp" || notificationMethod === "both";
+
+      if (shouldEmail && settings.length && settings[0].emailAlertsEnabled) {
+        if (batchingEnabled) {
+          await enqueueBatchAlert(shop, alertId, productId, locationId, quantity, threshold, "email");
+        } else {
+          await sendEmailAlert(shop, productName, quantity, threshold);
+        }
       }
 
-      if (
-        settings.length &&
-        settings[0].whatsappNumber &&
-        !settings[0].batchingEnabled
-      ) {
-        // Send WhatsApp immediately if batching is disabled
-        await sendWhatsAppAlert(shop, productName, quantity, threshold);
+      if (shouldWhatsApp && settings.length && settings[0].whatsappNumber) {
+        if (batchingEnabled) {
+          await enqueueBatchAlert(shop, alertId, productId, locationId, quantity, threshold, "whatsapp");
+        } else {
+          await sendWhatsAppAlert(shop, productName, quantity, threshold);
+        }
       }
 
-      console.log(`[alerts] Alert created for low inventory: ${alertId}`);
+      console.log(`[alerts] Alert processed for low inventory: ${alertId}`);
     } else {
-      // Check if we need to resolve existing alerts
+      // Check if we need to resolve existing alerts (stock is back to normal)
+      const existingConditions = [
+        eq(alerts.shopDomain, shop),
+        eq(alerts.productId, productId),
+        eq(alerts.status, "active"),
+      ];
+
+      // Also match by location for multi-location resolution
+      if (locationId) {
+        existingConditions.push(eq(alerts.locationId, locationId));
+      }
+
       const existing = await db
         .select()
         .from(alerts)
-        .where(
-          and(
-            eq(alerts.shopDomain, shop),
-            eq(alerts.productId, productId),
-            eq(alerts.status, "active")
-          )
-        );
+        .where(and(...existingConditions));
 
       for (const alert of existing) {
-        if (quantity > threshold) {
-          await resolveAlert(alert.id);
-          console.log(
-            `[alerts] Resolved alert ${alert.id} (inventory back to normal)`
-          );
-        }
+        await resolveAlert(alert.id);
+        console.log(
+          `[alerts] Resolved alert ${alert.id} (inventory back to normal: ${quantity}/${threshold})`
+        );
       }
     }
   } catch (error) {

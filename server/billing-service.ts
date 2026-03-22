@@ -85,12 +85,12 @@ function getCurrentMonth(): string {
 
 /**
  * Get or initialize usage tracker for current month
+ * Uses upsert pattern to avoid race conditions and duplicate entries
  */
 async function getOrInitializeUsageTracker(
   shopDomain: string
 ): Promise<any> {
   const month = getCurrentMonth();
-  const plan = await getUserPlan(shopDomain);
 
   const existing = await db
     .select()
@@ -108,19 +108,44 @@ async function getOrInitializeUsageTracker(
   }
 
   // Initialize new tracker for this month
-  const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS];
-  const limit = Math.max(tierConfig.emailLimit + tierConfig.whatsappLimit, 10);
+  const plan = await getUserPlan(shopDomain);
+  const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS] || PRICING_TIERS.free;
+  const emailLimit = tierConfig.emailLimit === -1 ? 999999 : tierConfig.emailLimit;
+  const whatsappLimit = tierConfig.whatsappLimit === -1 ? 999999 : tierConfig.whatsappLimit;
+  const totalLimit = emailLimit + whatsappLimit;
 
-  await db.insert(usageTracker).values({
-    shopDomain,
-    plan,
-    emailCount: 0,
-    whatsappCount: 0,
-    month,
-    usageRemaining: limit,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
+  try {
+    await db.insert(usageTracker).values({
+      shopDomain,
+      plan,
+      emailCount: 0,
+      whatsappCount: 0,
+      month,
+      usageRemaining: totalLimit,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  } catch (error: any) {
+    // Handle race condition: if another request already created the tracker,
+    // just fetch and return the existing one
+    if (error.code === "23505") {
+      const retry = await db
+        .select()
+        .from(usageTracker)
+        .where(
+          and(
+            eq(usageTracker.shopDomain, shopDomain),
+            eq(usageTracker.month, month)
+          )
+        )
+        .limit(1);
+
+      if (retry.length > 0) {
+        return retry[0];
+      }
+    }
+    throw error;
+  }
 
   return {
     shopDomain,
@@ -128,7 +153,7 @@ async function getOrInitializeUsageTracker(
     emailCount: 0,
     whatsappCount: 0,
     month,
-    usageRemaining: limit,
+    usageRemaining: totalLimit,
   };
 }
 
@@ -138,6 +163,7 @@ async function getOrInitializeUsageTracker(
 export async function trackEmailUsage(shopDomain: string): Promise<void> {
   try {
     const tracker = await getOrInitializeUsageTracker(shopDomain);
+    const month = getCurrentMonth();
 
     await db
       .update(usageTracker)
@@ -149,11 +175,11 @@ export async function trackEmailUsage(shopDomain: string): Promise<void> {
       .where(
         and(
           eq(usageTracker.shopDomain, shopDomain),
-          eq(usageTracker.month, tracker.month)
+          eq(usageTracker.month, month)
         )
       );
 
-    console.log(`[billing] Tracked email usage for ${shopDomain}`);
+    console.log(`[billing] Tracked email usage for ${shopDomain} (${tracker.emailCount + 1} total this month)`);
   } catch (error) {
     console.error("[billing] Error tracking email usage:", error);
   }
@@ -165,6 +191,7 @@ export async function trackEmailUsage(shopDomain: string): Promise<void> {
 export async function trackWhatsAppUsage(shopDomain: string): Promise<void> {
   try {
     const tracker = await getOrInitializeUsageTracker(shopDomain);
+    const month = getCurrentMonth();
 
     await db
       .update(usageTracker)
@@ -176,11 +203,11 @@ export async function trackWhatsAppUsage(shopDomain: string): Promise<void> {
       .where(
         and(
           eq(usageTracker.shopDomain, shopDomain),
-          eq(usageTracker.month, tracker.month)
+          eq(usageTracker.month, month)
         )
       );
 
-    console.log(`[billing] Tracked WhatsApp usage for ${shopDomain}`);
+    console.log(`[billing] Tracked WhatsApp usage for ${shopDomain} (${tracker.whatsappCount + 1} total this month)`);
   } catch (error) {
     console.error("[billing] Error tracking WhatsApp usage:", error);
   }
@@ -194,7 +221,7 @@ export async function canSendEmail(shopDomain: string): Promise<boolean> {
     const plan = await getUserPlan(shopDomain);
     const tracker = await getOrInitializeUsageTracker(shopDomain);
 
-    const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS];
+    const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS] || PRICING_TIERS.free;
 
     if (tierConfig.emailLimit === -1) {
       // Unlimited
@@ -216,7 +243,7 @@ export async function canSendWhatsApp(shopDomain: string): Promise<boolean> {
     const plan = await getUserPlan(shopDomain);
     const tracker = await getOrInitializeUsageTracker(shopDomain);
 
-    const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS];
+    const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS] || PRICING_TIERS.free;
 
     if (tierConfig.whatsappLimit === -1) {
       // Unlimited
@@ -237,7 +264,7 @@ export async function getRemainingUsage(shopDomain: string): Promise<any> {
   try {
     const plan = await getUserPlan(shopDomain);
     const tracker = await getOrInitializeUsageTracker(shopDomain);
-    const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS];
+    const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS] || PRICING_TIERS.free;
 
     const emailLimit =
       tierConfig.emailLimit === -1 ? "Unlimited" : tierConfig.emailLimit;
@@ -274,8 +301,10 @@ export async function resetUsageForMonth(shopDomain: string): Promise<void> {
   try {
     const plan = await getUserPlan(shopDomain);
     const month = getCurrentMonth();
-    const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS];
-    const limit = Math.max(tierConfig.emailLimit + tierConfig.whatsappLimit, 10);
+    const tierConfig = PRICING_TIERS[plan as keyof typeof PRICING_TIERS] || PRICING_TIERS.free;
+    const emailLimit = tierConfig.emailLimit === -1 ? 999999 : tierConfig.emailLimit;
+    const whatsappLimit = tierConfig.whatsappLimit === -1 ? 999999 : tierConfig.whatsappLimit;
+    const totalLimit = emailLimit + whatsappLimit;
 
     const existing = await db
       .select()
@@ -295,7 +324,7 @@ export async function resetUsageForMonth(shopDomain: string): Promise<void> {
           plan,
           emailCount: 0,
           whatsappCount: 0,
-          usageRemaining: limit,
+          usageRemaining: totalLimit,
           updatedAt: new Date(),
         })
         .where(
@@ -306,7 +335,7 @@ export async function resetUsageForMonth(shopDomain: string): Promise<void> {
         );
     }
 
-    console.log(`[billing] Reset usage for ${shopDomain}: ${month}`);
+    console.log(`[billing] Reset usage for ${shopDomain}: ${month} (limit: ${totalLimit})`);
   } catch (error) {
     console.error("[billing] Error resetting usage:", error);
   }

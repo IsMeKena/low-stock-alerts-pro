@@ -3,18 +3,23 @@ import { db } from "../db";
 import { shopSettings } from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { setPlan } from "../billing-service";
+import { verifySessionToken } from "../middleware";
 
 export function setupOnboardingRoutes(router: Router) {
   /**
    * POST /api/onboarding/complete
    * Complete onboarding wizard
+   * Protected: requires valid session token
    */
   router.post(
     "/api/onboarding/complete",
+    verifySessionToken,
     async (req: Request, res: Response) => {
       try {
+        const session = (req as any).shopifySession;
+        const shop = session.shop;
+
         const {
-          shop,
           plan,
           thresholdType,
           thresholdValue,
@@ -25,10 +30,6 @@ export function setupOnboardingRoutes(router: Router) {
           batchingEnabled,
           batchingInterval,
         } = req.body;
-
-        if (!shop) {
-          return res.status(400).json({ error: "Missing shop parameter" });
-        }
 
         // Validate inputs
         const planToSet = plan || "free"; // Auto-assign Free plan if not provided
@@ -135,6 +136,10 @@ export function setupOnboardingRoutes(router: Router) {
   /**
    * GET /api/onboarding/status
    * Check if shop has completed onboarding
+   * Note: This endpoint is intentionally NOT protected by verifySessionToken
+   * because it is called during the initial app load before a session token
+   * is available (the frontend uses it to decide whether to show onboarding).
+   * It only returns the onboarding boolean, not sensitive data.
    */
   router.get("/api/onboarding/status", async (req: Request, res: Response) => {
     try {
@@ -169,15 +174,15 @@ export function setupOnboardingRoutes(router: Router) {
   /**
    * POST /api/onboarding/dismiss-banner
    * Mark upsell banner as dismissed for this shop
+   * Protected: requires valid session token
    */
   router.post(
     "/api/onboarding/dismiss-banner",
+    verifySessionToken,
     async (req: Request, res: Response) => {
       try {
-        const shop = req.query.shop as string;
-        if (!shop) {
-          return res.status(400).json({ error: "Missing shop parameter" });
-        }
+        const session = (req as any).shopifySession;
+        const shop = session.shop;
 
         const existing = await db
           .select()

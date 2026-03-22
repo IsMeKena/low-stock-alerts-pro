@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, boolean, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, boolean, timestamp, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -17,8 +17,7 @@ export const shopifySessions = pgTable(
     onlineAccessInfo: text("online_access_info"),
   },
   (table) => [
-    // CRITICAL: Prevent duplicate sessions for same shop+mode combination
-    // This ensures we don't accumulate stale or invalid sessions
+    index("idx_sessions_shop").on(table.shop),
     sql`CONSTRAINT check_session_validity CHECK (access_token IS NOT NULL OR state IS NOT NULL)`,
   ]
 );
@@ -42,7 +41,10 @@ export const products = pgTable("products", {
   locationId: varchar("location_id", { length: 255 }), // for location-aware alerts
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("idx_products_shop_domain").on(table.shopDomain),
+  index("idx_products_shopify_id").on(table.shopifyProductId),
+]);
 
 export type Product = typeof products.$inferSelect;
 
@@ -56,7 +58,11 @@ export const inventory = pgTable("inventory", {
   quantity: integer("quantity").notNull().default(0),
   threshold: integer("threshold").default(5), // Alert when below this
   lastUpdated: timestamp("last_updated").notNull().defaultNow(),
-});
+}, (table) => [
+  index("idx_inventory_shop_domain").on(table.shopDomain),
+  index("idx_inventory_product_id").on(table.productId),
+  index("idx_inventory_product_location").on(table.productId, table.locationId),
+]);
 
 export type Inventory = typeof inventory.$inferSelect;
 
@@ -71,7 +77,11 @@ export const alerts = pgTable("alerts", {
   status: varchar("status", { length: 20 }).default("active"), // active, resolved, archived
   createdAt: timestamp("created_at").notNull().defaultNow(),
   resolvedAt: timestamp("resolved_at"),
-});
+}, (table) => [
+  index("idx_alerts_shop_domain").on(table.shopDomain),
+  index("idx_alerts_shop_product_status").on(table.shopDomain, table.productId, table.status),
+  index("idx_alerts_shop_product_location_status").on(table.shopDomain, table.productId, table.locationId, table.status),
+]);
 
 export type Alert = typeof alerts.$inferSelect;
 
@@ -97,7 +107,9 @@ export const usageTracker = pgTable("usage_tracker", {
   usageRemaining: integer("usage_remaining").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  uniqueIndex("idx_usage_tracker_shop_month").on(table.shopDomain, table.month),
+]);
 
 export type UsageTracker = typeof usageTracker.$inferSelect;
 
@@ -140,6 +152,9 @@ export const batchingQueue = pgTable("batching_queue", {
   scheduledFor: timestamp("scheduled_for").notNull(),
   sentAt: timestamp("sent_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [
+  index("idx_batching_shop_status").on(table.shopDomain, table.status),
+  index("idx_batching_scheduled").on(table.status, table.scheduledFor),
+]);
 
 export type BatchingQueue = typeof batchingQueue.$inferSelect;

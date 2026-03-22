@@ -141,13 +141,59 @@ async function ensureTables() {
 }
 
 /**
+ * Create database indexes for commonly queried columns.
+ * All use IF NOT EXISTS so this is safe to run on every startup.
+ */
+async function ensureIndexes() {
+  console.log("[db] Ensuring indexes exist...");
+
+  try {
+    const createIndexesSQL = `
+      -- Sessions: lookup by shop
+      CREATE INDEX IF NOT EXISTS idx_sessions_shop ON shopify_sessions(shop);
+
+      -- Products: lookup by shop domain and Shopify product ID
+      CREATE INDEX IF NOT EXISTS idx_products_shop_domain ON products(shop_domain);
+      CREATE INDEX IF NOT EXISTS idx_products_shopify_id ON products(shopify_product_id);
+
+      -- Inventory: lookup by product and location
+      CREATE INDEX IF NOT EXISTS idx_inventory_shop_domain ON inventory(shop_domain);
+      CREATE INDEX IF NOT EXISTS idx_inventory_product_id ON inventory(product_id);
+      CREATE INDEX IF NOT EXISTS idx_inventory_product_location ON inventory(product_id, location_id);
+
+      -- Alerts: lookup by shop, product, and status (the most common query pattern)
+      CREATE INDEX IF NOT EXISTS idx_alerts_shop_domain ON alerts(shop_domain);
+      CREATE INDEX IF NOT EXISTS idx_alerts_shop_product_status ON alerts(shop_domain, product_id, status);
+      CREATE INDEX IF NOT EXISTS idx_alerts_shop_product_location_status ON alerts(shop_domain, product_id, location_id, status);
+
+      -- Usage tracker: lookup by shop and month (unique constraint for upsert safety)
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_tracker_shop_month ON usage_tracker(shop_domain, month);
+
+      -- Batching queue: lookup by shop+status and by scheduled time
+      CREATE INDEX IF NOT EXISTS idx_batching_shop_status ON batching_queue(shop_domain, status);
+      CREATE INDEX IF NOT EXISTS idx_batching_scheduled ON batching_queue(status, scheduled_for);
+    `;
+
+    await client.query(createIndexesSQL);
+    console.log("[db] ✅ All indexes ready");
+    return true;
+  } catch (error) {
+    console.error("[db] ❌ Failed to ensure indexes:", error);
+    // Don't throw - indexes are optimization, not critical
+    console.warn("[db] Continuing without indexes");
+    return false;
+  }
+}
+
+/**
  * Initialize database on startup.
- * Creates all tables if they don't exist.
+ * Creates all tables and indexes if they don't exist.
  */
 export async function runMigrations() {
   try {
     console.log("[db] Ensuring all tables exist...");
     await ensureTables();
+    await ensureIndexes();
     console.log("[db] ✅ Database initialization complete");
     return true;
   } catch (error) {

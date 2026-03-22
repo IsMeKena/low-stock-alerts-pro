@@ -8,18 +8,18 @@ import {
 import { db } from "../db";
 import { shopSettings } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { verifySessionToken } from "../middleware";
 
 export function setupBillingRoutes(router: Router) {
   /**
    * GET /api/billing/plan
    * Get current billing plan and usage stats
+   * Protected: requires valid session token
    */
-  router.get("/api/billing/plan", async (req: Request, res: Response) => {
+  router.get("/api/billing/plan", verifySessionToken, async (req: Request, res: Response) => {
     try {
-      const shop = req.query.shop as string;
-      if (!shop) {
-        return res.status(400).json({ error: "Missing shop parameter" });
-      }
+      const session = (req as any).shopifySession;
+      const shop = session.shop;
 
       const plan = await getUserPlan(shop);
       const usage = await getRemainingUsage(shop);
@@ -38,13 +38,12 @@ export function setupBillingRoutes(router: Router) {
   /**
    * GET /api/billing/usage
    * Get detailed usage statistics
+   * Protected: requires valid session token
    */
-  router.get("/api/billing/usage", async (req: Request, res: Response) => {
+  router.get("/api/billing/usage", verifySessionToken, async (req: Request, res: Response) => {
     try {
-      const shop = req.query.shop as string;
-      if (!shop) {
-        return res.status(400).json({ error: "Missing shop parameter" });
-      }
+      const session = (req as any).shopifySession;
+      const shop = session.shop;
 
       const usage = await getRemainingUsage(shop);
 
@@ -68,22 +67,25 @@ export function setupBillingRoutes(router: Router) {
   /**
    * POST /api/billing/upgrade
    * Request plan upgrade (stub for now - future: Stripe integration)
+   * Protected: requires valid session token
    */
-  router.post("/api/billing/upgrade", async (req: Request, res: Response) => {
+  router.post("/api/billing/upgrade", verifySessionToken, async (req: Request, res: Response) => {
     try {
-      const { shop, plan } = req.body;
+      const session = (req as any).shopifySession;
+      const shop = session.shop;
+      const { plan } = req.body;
 
-      if (!shop || !plan) {
+      if (!plan) {
         return res
           .status(400)
-          .json({ error: "Missing shop or plan parameter" });
+          .json({ error: "Missing plan parameter" });
       }
 
       if (!["free", "pro", "premium"].includes(plan)) {
         return res.status(400).json({ error: "Invalid plan" });
       }
 
-      // TODO: Integrate with Stripe for actual payment processing
+      // TODO: Integrate with Stripe/Shopify billing for actual payment processing
       // For now, just update the plan directly (NOT production-ready!)
       await setPlan(shop, plan);
 
@@ -101,15 +103,14 @@ export function setupBillingRoutes(router: Router) {
   /**
    * POST /api/billing/settings
    * Update billing and notification settings
+   * Protected: requires valid session token
    */
-  router.post("/api/billing/settings", async (req: Request, res: Response) => {
+  router.post("/api/billing/settings", verifySessionToken, async (req: Request, res: Response) => {
     try {
-      const { shop, whatsappNumber, batchingEnabled, batchingInterval, emailAlertsEnabled } =
+      const session = (req as any).shopifySession;
+      const shop = session.shop;
+      const { whatsappNumber, batchingEnabled, batchingInterval, emailAlertsEnabled } =
         req.body;
-
-      if (!shop) {
-        return res.status(400).json({ error: "Missing shop parameter" });
-      }
 
       // Validate WhatsApp number if provided
       if (whatsappNumber) {
@@ -170,13 +171,12 @@ export function setupBillingRoutes(router: Router) {
   /**
    * GET /api/billing/settings
    * Get current shop settings
+   * Protected: requires valid session token
    */
-  router.get("/api/billing/settings", async (req: Request, res: Response) => {
+  router.get("/api/billing/settings", verifySessionToken, async (req: Request, res: Response) => {
     try {
-      const shop = req.query.shop as string;
-      if (!shop) {
-        return res.status(400).json({ error: "Missing shop parameter" });
-      }
+      const session = (req as any).shopifySession;
+      const shop = session.shop;
 
       const settings = await db
         .select()
