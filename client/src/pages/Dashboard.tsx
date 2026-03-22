@@ -76,7 +76,15 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
   const [shopSettings, setShopSettings] = useState<ShopSettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [webhookStatus, setWebhookStatus] = useState<"ok" | "no_token" | "missing" | "checking">("checking");
+  const [fixingWebhooks, setFixingWebhooks] = useState(false);
   const navigate = useNavigate();
+
+  const handleReauth = useCallback(() => {
+    if (!shop) return;
+    const appUrl = window.location.origin;
+    window.top!.location.href = `${appUrl}/api/auth?shop=${shop}`;
+  }, [shop]);
 
   const fetchData = useCallback(async () => {
     if (!shop) return;
@@ -105,20 +113,28 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
         setAlerts(alertsData.alerts || []);
       }
 
-      authenticatedFetch(`/api/webhooks/ensure`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shop }),
-      })
-        .then(async (r) => {
-          if (r.ok) {
-            const data = await r.json();
-            if (data.action === "registered") {
-              console.log("[dashboard] Webhooks auto-registered:", data.missingTopics);
-            }
+      try {
+        const ensureRes = await authenticatedFetch(`/api/webhooks/ensure`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ shop }),
+        });
+        if (ensureRes.ok) {
+          const data = await ensureRes.json();
+          if (data.reason === "no_access_token") {
+            setWebhookStatus("no_token");
+          } else if (data.action === "registered") {
+            console.log("[dashboard] Webhooks auto-registered:", data.missingTopics);
+            setWebhookStatus("ok");
+          } else if (data.action === "already_registered" || data.success) {
+            setWebhookStatus("ok");
+          } else {
+            setWebhookStatus("missing");
           }
-        })
-        .catch((err) => console.warn("[dashboard] Webhook ensure check failed:", err));
+        }
+      } catch (err) {
+        console.warn("[dashboard] Webhook ensure check failed:", err);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dashboard");
     } finally {
@@ -256,6 +272,25 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
       titleMetadata={billing ? getPlanBadge(currentPlan) : undefined}
     >
       <Layout>
+        {webhookStatus === "no_token" && (
+          <Layout.Section>
+            <Banner
+              title="Inventory monitoring is inactive"
+              tone="warning"
+              action={{
+                content: fixingWebhooks ? "Reconnecting..." : "Reconnect now",
+                onAction: handleReauth,
+                disabled: fixingWebhooks,
+              }}
+            >
+              <p>
+                We need to reconnect to your Shopify store to monitor inventory
+                changes. This takes just a moment.
+              </p>
+            </Banner>
+          </Layout.Section>
+        )}
+
         {shopSettings && (
           <Layout.Section>
             <UpsellBanner
@@ -269,7 +304,7 @@ export default function Dashboard({ shop, isOnboarded }: DashboardProps) {
           </Layout.Section>
         )}
 
-        {!hasAlerts && (
+        {!hasAlerts && webhookStatus !== "no_token" && (
           <Layout.Section>
             <Banner tone="success" icon={CheckCircleIcon}>
               <p>
