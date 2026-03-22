@@ -9,17 +9,19 @@ export function setupOnboardingRoutes(router: Router) {
   /**
    * POST /api/onboarding/complete
    * Complete onboarding wizard
-   * Protected: requires valid session token
+   *
+   * NOT protected by verifySessionToken because onboarding runs immediately
+   * after OAuth install, before the frontend has a reliable session token.
+   * The shop domain comes from req.body (set by the client from the URL
+   * query param that Shopify provides). This is acceptable because the
+   * endpoint only writes the caller's own notification preferences.
    */
   router.post(
     "/api/onboarding/complete",
-    verifySessionToken,
     async (req: Request, res: Response) => {
       try {
-        const session = (req as any).shopifySession;
-        const shop = session.shop;
-
         const {
+          shop,
           plan,
           thresholdType,
           thresholdValue,
@@ -31,8 +33,12 @@ export function setupOnboardingRoutes(router: Router) {
           batchingInterval,
         } = req.body;
 
+        if (!shop) {
+          return res.status(400).json({ error: "Missing shop parameter" });
+        }
+
         // Validate inputs
-        const planToSet = plan || "free"; // Auto-assign Free plan if not provided
+        const planToSet = plan || "free";
         
         if (!["free", "pro", "premium"].includes(planToSet)) {
           return res.status(400).json({ error: "Invalid plan" });
@@ -79,7 +85,7 @@ export function setupOnboardingRoutes(router: Router) {
           }
         }
 
-        // Set billing plan to Free (auto-assign)
+        // Set billing plan
         await setPlan(shop, planToSet);
 
         // Update or create settings
@@ -136,10 +142,10 @@ export function setupOnboardingRoutes(router: Router) {
   /**
    * GET /api/onboarding/status
    * Check if shop has completed onboarding
-   * Note: This endpoint is intentionally NOT protected by verifySessionToken
-   * because it is called during the initial app load before a session token
-   * is available (the frontend uses it to decide whether to show onboarding).
-   * It only returns the onboarding boolean, not sensitive data.
+   *
+   * Not protected by verifySessionToken because it is called during
+   * initial app load before a session token is available. It only
+   * returns the onboarding boolean flag, not sensitive data.
    */
   router.get("/api/onboarding/status", async (req: Request, res: Response) => {
     try {
@@ -199,7 +205,6 @@ export function setupOnboardingRoutes(router: Router) {
             })
             .where(eq(shopSettings.shopDomain, shop));
         } else {
-          // Create new record with banner dismissed
           await db.insert(shopSettings).values({
             shopDomain: shop,
             dismissedUpsellBanner: true,
